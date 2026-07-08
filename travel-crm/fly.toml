@@ -1,0 +1,24 @@
+# Separate Fly app (DB-connected build): https://travel-crm-db.fly.dev
+# Old static-only app remains at: https://travel-crm-new.fly.dev
+app = 'travel-crm-db'
+primary_region = 'bom'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  NODE_ENV = 'production'
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

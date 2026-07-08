@@ -1,0 +1,777 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-slate-800 font-sans antialiased;
+  }
+
+  .dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+
+  select,
+  option {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+    @apply dark:bg-slate-800/80 dark:border-slate-700/40;
+  }
+
+  .btn-primary {
+    @apply bg-crm-600 hover:bg-crm-700 text-white font-bold py-3 px-6 rounded-2xl transition-all duration-200 shadow-lg shadow-crm-600/20 active:scale-95 uppercase text-xs tracking-widest;
+  }
+
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-slate-700 border border-slate-200 font-bold py-3 px-6 rounded-2xl transition-all duration-200 shadow-sm active:scale-95 uppercase text-xs tracking-widest;
+    @apply dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-600;
+  }
+
+  .input-field {
+    @apply w-full px-5 py-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 text-slate-700 font-bold transition-all duration-200;
+    @apply focus:outline-none focus:ring-4 focus:ring-crm-500/10 focus:border-crm-500 focus:bg-white;
+    @apply hover:border-slate-300;
+    @apply dark:bg-slate-800/50 dark:text-slate-100 dark:border-slate-600 dark:hover:border-slate-500 dark:focus:bg-slate-800;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.slate.200') transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: theme('colors.slate.200');
+    border-radius: 20px;
+    border: 2px solid transparent;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: theme('colors.slate.300');
+  }
+
+  .custom-select {
+    @apply appearance-none bg-no-repeat cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-position: right 1rem center;
+    background-size: 1.1rem;
+  }
+
+  .crm-select-wrap .crm-dropdown-chevron {
+    @apply transition-transform duration-200;
+  }
+
+  .crm-select-wrap select {
+    @apply cursor-pointer;
+  }
+
+  /* Custom dropdown panels — pointer on hoverable options */
+  .crm-dropdown-menu :is(button:not(:disabled), label, [role='option'], a) {
+    cursor: pointer;
+  }
+
+  .absolute.top-full :is(button:not(:disabled), label, [role='option']),
+  .absolute.bottom-full :is(button:not(:disabled), label, [role='option']) {
+    cursor: pointer;
+  }
+
+  .crm-select-wrap:focus-within .crm-dropdown-chevron:not([data-open]) {
+    transform: rotate(180deg);
+  }
+
+  .crm-dropdown-chevron[data-open='true'] {
+    transform: rotate(180deg);
+  }
+
+  .crm-dropdown-chevron[data-open='false'] {
+    transform: rotate(0deg);
+  }
+
+  .input-group-icon {
+    @apply absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors duration-200;
+  }
+
+  .input-container:focus-within .input-group-icon {
+    @apply text-crm-500;
+  }
+
+  .form-label {
+    @apply block text-[11px] font-bold text-slate-500 mb-1 uppercase tracking-wider;
+    @apply dark:text-slate-300;
+  }
+
+  .form-hint {
+    @apply text-[10px] text-slate-400 mt-1;
+    @apply dark:text-slate-400;
+  }
+
+  /** Quotation price inputs — wide enough for large amounts (e.g. 1500000). */
+  .crm-price-field-wrap {
+    @apply relative min-w-[9.5rem] shrink-0;
+  }
+
+  .crm-price-field {
+    @apply w-full min-w-[9.5rem] tabular-nums text-right;
+  }
+
+  .crm-price-field-compact {
+    @apply min-w-[8rem] w-[8rem] tabular-nums text-right;
+  }
+
+  .crm-price-amount {
+    @apply inline-block min-w-[9.5rem] tabular-nums text-right;
+  }
+
+  .team-field-panel {
+    @apply mt-2 p-2 rounded-lg border space-y-1.5 bg-slate-50 border-slate-100;
+    @apply dark:bg-slate-800/80 dark:border-slate-600;
+  }
+
+  .team-field-panel--restricted {
+    @apply bg-slate-100 border-slate-200;
+    @apply dark:bg-slate-700 dark:border-slate-500;
+  }
+
+  .team-field-label {
+    @apply text-slate-500;
+    @apply dark:text-slate-300;
+  }
+
+  .team-field-value {
+    @apply font-black text-crm-600;
+    @apply dark:text-sky-300;
+  }
+
+  .team-field-value--restricted {
+    @apply text-slate-700 cursor-not-allowed;
+    @apply dark:text-slate-100;
+  }
+
+  .team-access-badge--restricted {
+    @apply bg-slate-200 text-slate-700 border-slate-300 cursor-not-allowed;
+    @apply dark:bg-slate-600 dark:text-slate-100 dark:border-slate-500;
+  }
+}
+
+/* Dark theme — global surface & text overrides for app pages */
+.dark {
+  color-scheme: dark;
+}
+
+.dark :where(.bg-white) {
+  background-color: rgb(30 41 59);
+}
+
+.dark :where(.bg-white\/80) {
+  background-color: rgb(30 41 59 / 0.8);
+}
+
+.dark :where(.bg-slate-50, .bg-gray-50) {
+  background-color: rgb(15 23 42);
+}
+
+.dark :where(.bg-slate-50\/50) {
+  background-color: rgb(30 41 59 / 0.65);
+}
+
+.dark :where(.bg-slate-50\/80) {
+  background-color: rgb(30 41 59 / 0.8);
+}
+
+.dark :where(.bg-slate-50\/30) {
+  background-color: rgb(30 41 59 / 0.45);
+}
+
+.dark :where(.bg-blue-50\/30) {
+  background-color: rgb(30 58 138 / 0.22);
+}
+
+.dark :where(.from-slate-50) {
+  --tw-gradient-from: rgb(30 41 59) var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(30 41 59 / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+
+.dark :where(.to-white) {
+  --tw-gradient-to: rgb(51 65 85) var(--tw-gradient-to-position);
+}
+
+.dark :where(.bg-slate-100) {
+  background-color: rgb(51 65 85);
+}
+
+.dark :where(.bg-blue-100) {
+  background-color: rgb(30 64 175 / 0.35);
+}
+
+.dark :where(.bg-amber-100) {
+  background-color: rgb(146 64 14 / 0.35);
+}
+
+.dark :where(.text-slate-900) {
+  color: rgb(241 245 249);
+}
+
+.dark :where(.text-slate-800) {
+  color: rgb(226 232 240);
+}
+
+.dark :where(.text-slate-700) {
+  color: rgb(203 213 225);
+}
+
+.dark :where(.text-slate-600) {
+  color: rgb(186 198 215);
+}
+
+.dark :where(.text-slate-500) {
+  color: rgb(203 213 225);
+}
+
+.dark :where(.text-slate-400) {
+  color: rgb(148 163 184);
+}
+
+.dark :where(.text-slate-300) {
+  color: rgb(203 213 225);
+}
+
+.dark :where(.border-slate-100, .border-slate-200, .border-slate-300) {
+  border-color: rgb(51 65 85);
+}
+
+.dark :where(.divide-slate-100 > :not([hidden]) ~ :not([hidden]), .divide-slate-200 > :not([hidden]) ~ :not([hidden])) {
+  border-color: rgb(51 65 85);
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-gray-50:hover {
+  background-color: rgb(51 65 85);
+}
+
+.dark .hover\:bg-slate-50\/80:hover,
+.dark .hover\:bg-slate-50\/50:hover,
+.dark .hover\:bg-slate-50\/60:hover {
+  background-color: rgb(51 65 85);
+}
+
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-slate-200:hover {
+  background-color: rgb(51 65 85);
+}
+
+.dark .hover\:bg-amber-50:hover {
+  background-color: rgb(120 53 15 / 0.35);
+}
+
+.dark .hover\:bg-red-50:hover {
+  background-color: rgb(136 19 55 / 0.25);
+}
+
+.dark .hover\:bg-crm-50:hover {
+  background-color: rgb(12 74 110 / 0.25);
+}
+
+.dark .hover\:bg-crm-50\/50:hover {
+  background-color: rgb(51 65 85 / 0.65);
+}
+
+.dark .hover\:border-crm-100:hover {
+  border-color: rgb(71 85 105);
+}
+
+.dark .group:hover .group-hover\:bg-white {
+  background-color: rgb(51 65 85);
+}
+
+.dark .hover\:text-slate-600:hover,
+.dark .hover\:text-slate-700:hover,
+.dark .hover\:text-slate-900:hover {
+  color: rgb(226 232 240);
+}
+
+.dark .hover\:text-amber-900:hover {
+  color: rgb(252 211 77);
+}
+
+.dark input:where([class*='bg-slate-50']),
+.dark select:where([class*='bg-slate-50']),
+.dark textarea:where([class*='bg-slate-50']) {
+  background-color: rgb(15 23 42);
+  color: rgb(241 245 249);
+  border-color: rgb(71 85 105);
+}
+
+.dark input:where([class*='bg-slate-50'])::placeholder,
+.dark textarea:where([class*='bg-slate-50'])::placeholder {
+  color: rgb(100 116 139);
+}
+
+.dark input:where([class*='bg-slate-50']):hover,
+.dark select:where([class*='bg-slate-50']):hover,
+.dark textarea:where([class*='bg-slate-50']):hover {
+  background-color: rgb(15 23 42);
+}
+
+/* Status selects — native option list must stay readable in dark mode */
+.dark select.booking-status-select option {
+  background-color: rgb(30 41 59);
+  color: rgb(241 245 249);
+}
+
+.dark select.booking-status-select option:checked,
+.dark select.booking-status-select option:hover {
+  background-color: rgb(51 65 85);
+  color: rgb(241 245 249);
+}
+
+select.booking-status-select option {
+  background-color: rgb(255 255 255);
+  color: rgb(15 23 42);
+}
+
+.dark input:disabled,
+.dark select:disabled,
+.dark textarea:disabled {
+  opacity: 1;
+  color: rgb(226 232 240);
+  -webkit-text-fill-color: rgb(226 232 240);
+  background-color: rgb(51 65 85);
+  border-color: rgb(71 85 105);
+}
+
+.dark :where(.bg-slate-50\/60) {
+  background-color: rgb(51 65 85);
+}
+
+.dark input:where([class*='hover:bg-white']):hover,
+.dark select:where([class*='hover:bg-white']):hover,
+.dark textarea:where([class*='hover:bg-white']):hover {
+  background-color: rgb(30 41 59);
+}
+
+.dark :where(.bg-crm-50) {
+  background-color: rgb(12 74 110 / 0.25);
+}
+
+.dark :where(.border-crm-100, .border-crm-200) {
+  border-color: rgb(3 105 161 / 0.4);
+}
+
+.dark :where(.text-crm-700) {
+  color: rgb(125 211 252);
+}
+
+.dark :where(.bg-blue-50) {
+  background-color: rgb(30 58 138 / 0.25);
+}
+
+.dark :where(.text-blue-700, .text-blue-800) {
+  color: rgb(147 197 253);
+}
+
+.dark :where(.border-blue-100, .border-blue-200) {
+  border-color: rgb(30 64 175 / 0.4);
+}
+
+.dark :where(.bg-amber-50) {
+  background-color: rgb(120 53 15 / 0.25);
+}
+
+.dark :where(.text-amber-700, .text-amber-800, .text-amber-900) {
+  color: rgb(252 211 77);
+}
+
+.dark :where(.border-amber-100, .border-amber-200) {
+  border-color: rgb(146 64 14 / 0.4);
+}
+
+.dark :where(.bg-indigo-50) {
+  background-color: rgb(49 46 129 / 0.25);
+}
+
+.dark :where(.text-indigo-600, .text-indigo-700) {
+  color: rgb(165 180 252);
+}
+
+.dark :where(.border-indigo-100, .border-indigo-200) {
+  border-color: rgb(67 56 202 / 0.4);
+}
+
+.dark :where(.bg-purple-50) {
+  background-color: rgb(88 28 135 / 0.25);
+}
+
+.dark :where(.text-purple-700) {
+  color: rgb(216 180 254);
+}
+
+.dark :where(.border-purple-100) {
+  border-color: rgb(107 33 168 / 0.4);
+}
+
+.dark :where(.bg-emerald-50) {
+  background-color: rgb(6 78 59 / 0.25);
+}
+
+.dark :where(.text-emerald-600, .text-emerald-700) {
+  color: rgb(110 231 183);
+}
+
+.dark :where(.border-emerald-100, .border-emerald-500) {
+  border-color: rgb(5 150 105 / 0.45);
+}
+
+.dark :where(.bg-rose-50) {
+  background-color: rgb(136 19 55 / 0.25);
+}
+
+.dark :where(.text-rose-700) {
+  color: rgb(251 113 133);
+}
+
+.dark :where(.border-rose-100) {
+  border-color: rgb(190 18 60 / 0.4);
+}
+
+.dark :where(.bg-green-50) {
+  background-color: rgb(20 83 45 / 0.25);
+}
+
+.dark :where(.text-green-700) {
+  color: rgb(134 239 172);
+}
+
+.dark :where(.border-green-100) {
+  border-color: rgb(22 101 52 / 0.4);
+}
+
+.dark :where(.shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow-color: rgb(0 0 0 / 0.35);
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: rgb(71 85 105) transparent;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(71 85 105);
+}
+
+.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(100 116 139);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-slate-600 hover:bg-slate-500;
+}
+
+.dark .terms-rich-editor h2,
+.dark .terms-rich-content h2 {
+  color: rgb(241 245 249);
+}
+
+.dark .terms-rich-editor h3,
+.dark .terms-rich-content h3 {
+  color: rgb(226 232 240);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full hover:bg-slate-400 transition-colors;
+}
+
+@media print {
+  @page {
+    margin: 16mm 10mm 14mm 10mm;
+    size: A4 portrait;
+    background: white;
+  }
+
+  @page quote-sheet {
+    size: A4 portrait;
+    margin: 16mm 10mm 14mm 10mm;
+    background: white;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .quote-print-modal,
+  .quote-print-modal *,
+  .quote-print-scroll,
+  .quote-print-scroll *,
+  #invoice-print-area,
+  #invoice-print-area *,
+  #printable-quote,
+  #printable-quote * {
+    visibility: visible;
+  }
+
+  .quote-print-modal {
+    position: absolute !important;
+    inset: auto !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    background: white !important;
+    z-index: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .quote-print-scroll {
+    position: static !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    background: white !important;
+    width: 100% !important;
+  }
+
+  #invoice-print-area {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #invoice-print-area .bg-slate-50,
+  #invoice-print-area .bg-gray-50 {
+    background-color: white !important;
+  }
+
+  /* ── Quotation PDF: same layout on every page ── */
+  #printable-quote {
+    page: quote-sheet;
+    position: relative !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: #0f172a !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    font-family: Inter, system-ui, sans-serif !important;
+    font-size: 9pt !important;
+    line-height: 1.45 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #printable-quote .quote-print-body {
+    padding: 18mm 0 14mm 0 !important;
+  }
+
+  #printable-quote .quote-print-running-header {
+    display: flex !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 13mm;
+    padding: 0 0 2mm 0;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 2px solid #0f172a;
+    background: white !important;
+    z-index: 9999;
+    box-sizing: border-box;
+  }
+
+  #printable-quote .quote-print-running-footer {
+    display: flex !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 10mm;
+    padding: 2mm 0 0 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    border-top: 1px solid #e2e8f0;
+    background: white !important;
+    z-index: 9999;
+    box-sizing: border-box;
+    font-size: 7pt !important;
+    color: #64748b !important;
+  }
+
+  #printable-quote .quote-print-page-num::after {
+    content: 'Page ' counter(page);
+    font-weight: 700;
+    color: #94a3b8;
+  }
+
+  #printable-quote .quote-print-section-title {
+    font-size: 8pt !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.2em !important;
+    color: #0f172a !important;
+    border-bottom: 2px solid #f1f5f9 !important;
+    padding-bottom: 4px !important;
+    margin-bottom: 12px !important;
+  }
+
+  #printable-quote .bg-slate-50 {
+    background-color: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  #printable-quote .bg-slate-900 {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #printable-quote .text-crm-400,
+  #printable-quote .text-crm-600 {
+    color: #0d9488 !important;
+  }
+
+  #printable-quote .border-slate-900,
+  #printable-quote .border-b-4.border-slate-900 {
+    border-color: #0f172a !important;
+  }
+
+  #printable-quote .rounded-3xl,
+  #printable-quote .rounded-2xl {
+    border-radius: 8px !important;
+  }
+
+  #printable-quote .grid-cols-4 {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  #printable-quote .grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .print-break-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  #invoice-print-area .text-slate-500,
+  #invoice-print-area .text-slate-400 {
+    color: #4b5563 !important;
+  }
+}
+
+/* Terms rich text — editor & quotation display */
+.terms-rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.terms-rich-editor h2,
+.terms-rich-content h2 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0.75rem 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.terms-rich-editor h3,
+.terms-rich-content h3 {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0.6rem 0 0.25rem;
+}
+
+.terms-rich-editor p,
+.terms-rich-content p {
+  margin: 0.35rem 0;
+  line-height: 1.55;
+}
+
+.terms-rich-editor ul,
+.terms-rich-editor ol,
+.terms-rich-content ul,
+.terms-rich-content ol {
+  margin: 0.35rem 0 0.5rem 1.15rem;
+  padding: 0;
+}
+
+.terms-rich-editor li,
+.terms-rich-content li {
+  margin: 0.2rem 0;
+  line-height: 1.5;
+}
+
+.terms-rich-content strong,
+.terms-rich-editor strong {
+  font-weight: 700;
+}

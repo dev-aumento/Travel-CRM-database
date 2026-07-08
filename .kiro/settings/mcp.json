@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "powers": {
+    "mcpServers": {
+      "power-figma-figma": {
+        "url": "https://mcp.figma.com/mcp",
+        "disabled": false,
+        "disabledTools": []
+      }
+    }
+  }
+}
