@@ -3,6 +3,11 @@ import { isTermsHtml, termsContentIsEmpty, termsHtmlToEmailInner } from './terms
 import { parseTravelers } from './pricing';
 import { formatMoneyAmount, getCurrencyCodeLabel } from './currency';
 import { resolveMainAgencyAgent } from './databaseSync';
+import {
+    formatAgencyBankDetailsLines,
+    hasAgencyBankDetails,
+    type AgencyBankDetails,
+} from './agencyBankDetails';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -40,6 +45,7 @@ export type BuildQuoteEmailParams = {
     presets?: any[];
     fromEmail?: string;
     currency?: string;
+    bankDetails?: AgencyBankDetails | null;
 };
 
 const escapeHtml = (value: unknown) =>
@@ -433,6 +439,22 @@ const buildTermsSection = (terms: QuoteTermsRecord | null) => {
   </table>`;
 };
 
+const buildBankDetailsSection = (bankDetails?: AgencyBankDetails | null) => {
+    if (!hasAgencyBankDetails(bankDetails)) return '';
+    const lines = formatAgencyBankDetailsLines(bankDetails)
+        .map(
+            (line) =>
+                `<div style="margin-bottom:4px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.45;">${escapeHtml(line)}</div>`
+        )
+        .join('');
+    return `${tableOpen()}
+    ${sectionHeader('Bank Details')}
+    <tr>
+      <td style="border:1px solid ${BORDER};padding:10px 12px;">${lines}</td>
+    </tr>
+  </table>`;
+};
+
 export const buildQuoteEmailHtml = (params: BuildQuoteEmailParams): string => {
     const firstName = (params.quote.customer || 'Traveler').split(' ')[0];
     const presets = params.presets || [];
@@ -449,6 +471,7 @@ export const buildQuoteEmailHtml = (params: BuildQuoteEmailParams): string => {
     ${buildTransportSection(params.quote, presets)}
     ${buildInclusionsExclusionsSection(params.quote)}
     ${buildTermsSection(params.terms)}
+    ${buildBankDetailsSection(params.bankDetails)}
     <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;margin-top:20px;">
       Best regards,<br/><strong>${escapeHtml(params.agencyName)}</strong>
     </p>`;

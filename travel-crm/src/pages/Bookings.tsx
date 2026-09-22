@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CreditCard, Calendar, CheckCircle2, Clock, X, Eye, FileText, Download, User, Building, Edit2, Plus, Mail, Phone, Ban, Hotel, Lock } from 'lucide-react';
 import DropdownChevron from '../components/DropdownChevron';
 import HotelVoucherSendModal from '../components/HotelVoucherSendModal';
+import VisibleScrollArea from '../components/VisibleScrollArea';
 import { resolveBookingVoucherContext } from '../utils/hotelVoucherShare';
 import CancelTripModal, { type CancelTripTarget } from '../components/CancelTripModal';
 import { useDatabase } from '../context/DatabaseContext';
@@ -22,34 +23,29 @@ import {
     filterBookingsFromConfirmedLeads,
     findLeadForBookingIndexed,
     getBookingDisplayStatus,
+    getPipelineStatusLabel,
+    normalizePipelineStatus,
+    BOOKING_PIPELINE_STATUS_OPTIONS,
     recordVisibleToSession,
     sortBookingsNewestFirst,
 } from '../utils/databaseSync';
 import { useAgencyBranding } from '../hooks/useAgencyBranding';
 import { useCurrency } from '../hooks/useCurrency';
 import { formatTrackingId } from '../utils/trackingId';
+import AgencyBankDetailsBlock from '../components/AgencyBankDetailsBlock';
+import { resolveAgencyBankDetails } from '../utils/agencyBankDetails';
 
-const STATUS_OPTIONS = [
-    { value: 'new', label: 'New Lead' },
-    { value: 'contacted', label: 'Contacted' },
-    { value: 'itinerary', label: 'Itinerary Sent' },
-    { value: 'negotiation', label: 'Negotiation' },
-    { value: 'pending', label: 'Booking Pending' },
-    { value: 'confirmed', label: 'Booking Confirmed' },
-    { value: 'completed', label: 'Trip Completed' },
-    { value: 'cancelled', label: 'Canceled' },
-];
+const STATUS_OPTIONS = BOOKING_PIPELINE_STATUS_OPTIONS;
 
 const getStatusColor = (status: string) => {
-    switch (status) {
+    const normalized = normalizePipelineStatus(status);
+    switch (normalized) {
         case 'confirmed': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
         case 'completed': return 'bg-blue-50 text-blue-700 border-blue-200';
-        case 'pending': return 'bg-amber-50 text-amber-700 border-amber-200';
         case 'new': return 'bg-blue-50 text-blue-700 border-blue-200';
         case 'contacted': return 'bg-amber-50 text-amber-700 border-amber-200';
         case 'itinerary': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
         case 'negotiation': return 'bg-purple-50 text-purple-700 border-purple-200';
-        case 'cancelled':
         case 'canceled': return 'bg-rose-50 text-rose-700 border-rose-200';
         default: return 'bg-slate-100 text-slate-600 border-slate-200';
     }
@@ -92,24 +88,25 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
             return;
         }
 
-        // Update booking
-        updateRecord('bookings', bk.id, { [field]: value });
-        
         if (field === 'status') {
-            // Sync back to matching lead too
+            const pipelineStatus = normalizePipelineStatus(value);
+            updateRecord('bookings', bk.id, { status: pipelineStatus });
+
             if (linkedLead) {
-                updateRecord('leads', linkedLead.id, { status: value });
+                updateRecord('leads', linkedLead.id, { status: pipelineStatus });
             }
 
-            // Sync with matching quotation
             const quotationMatch =
                 (bk.quoteId && (db.quotations?.data || []).find((q: any) => q.id === bk.quoteId)) ||
                 (linkedLead?.confirmedQuoteId &&
                     (db.quotations?.data || []).find((q: any) => q.id === linkedLead.confirmedQuoteId));
             if (quotationMatch) {
-                updateRecord('quotations', quotationMatch.id, { status: value });
+                updateRecord('quotations', quotationMatch.id, { status: pipelineStatus });
             }
+            return;
         }
+
+        updateRecord('bookings', bk.id, { [field]: value });
     };
 
     return (
@@ -154,7 +151,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                 </>
                             ) : (
                                 <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${getStatusColor(displayStatus)}`}>
-                                    {STATUS_OPTIONS.find((o) => o.value === displayStatus)?.label || displayStatus}
+                                    {getPipelineStatusLabel(displayStatus)}
                                 </span>
                             )}
                         </div>
@@ -226,7 +223,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                         <div>
                                             <span className="block text-slate-400 text-[10px] uppercase tracking-wider font-semibold mb-1">Status</span>
                                             <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black border uppercase ${getStatusColor(displayStatus)}`}>
-                                                {STATUS_OPTIONS.find((o) => o.value === displayStatus)?.label || displayStatus}
+                                                {getPipelineStatusLabel(displayStatus)}
                                             </span>
                                         </div>
 
@@ -316,7 +313,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                             </>
                                         ) : (
                                             <div className={`w-full px-3 py-2 border rounded-lg text-sm font-medium ${getStatusColor(displayStatus)}`}>
-                                                {STATUS_OPTIONS.find((o) => o.value === displayStatus)?.label || displayStatus}
+                                                {getPipelineStatusLabel(displayStatus)}
                                             </div>
                                         )}
                                     </div>
@@ -353,7 +350,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                         </button>
                                     )}
 
-                                    {canEdit && bk.status !== 'cancelled' && bk.status !== 'canceled' && (
+                                    {canEdit && normalizePipelineStatus(bk.status) !== 'canceled' && (
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -407,7 +404,12 @@ const Bookings = () => {
         return sortBookingsNewestFirst(filtered, db, leadIndex);
     }, [bookingsData, leadIndex, db, userRole, sessionScope]);
 
-    const { name: agencyName } = useAgencyBranding();
+    const agencyBranding = useAgencyBranding();
+    const agencyName = agencyBranding.name;
+    const agencyBankDetails = useMemo(
+        () => resolveAgencyBankDetails(agencyBranding.settings),
+        [agencyBranding.settings]
+    );
     const [selectedBooking, setSelectedBooking] = useState<any>(null);
     const [voucherBooking, setVoucherBooking] = useState<any>(null);
     const [cancelTarget, setCancelTarget] = useState<CancelTripTarget | null>(null);
@@ -536,30 +538,30 @@ const Bookings = () => {
     };
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Bookings</h1>
-                    <p className="text-slate-500 mt-1">Confirmed leads only — appears here after a lead reaches Booking Confirmed in the pipeline.</p>
+        <div className="h-full min-h-0 flex flex-col overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6 shrink-0">
+                <div className="min-w-0">
+                    <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Bookings</h1>
+                    <p className="text-slate-500 mt-1 text-sm">Confirmed leads only — appears here after a lead reaches Booking Confirmed in the pipeline.</p>
                 </div>
-                <div className="flex gap-3">
-                    <button onClick={handleDownloadReport} className="btn-secondary flex items-center gap-2">
+                <div className="flex gap-3 shrink-0">
+                    <button onClick={handleDownloadReport} className="btn-secondary flex items-center gap-2 whitespace-nowrap">
                         <Download size={18} /> Download Report
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                <div className="overflow-x-auto flex-1">
-                    <table className="w-full text-sm text-left">
+            <div className="flex-1 min-h-0 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                <VisibleScrollArea>
+                    <table className="w-full min-w-[960px] text-sm text-left">
                         <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="px-6 py-4">Booking ID</th>
-                                <th className="px-6 py-4">Customer</th>
-                                <th className="px-6 py-4">Package</th>
-                                <th className="px-6 py-4">Dates</th>
-                                <th className="px-6 py-4">Total</th>
-                                <th className="px-6 py-4">Status</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Booking ID</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Customer</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Package</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Dates</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Total</th>
+                                <th className="px-6 py-4 whitespace-nowrap">Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -582,7 +584,7 @@ const Bookings = () => {
                             })}
                         </tbody>
                     </table>
-                </div>
+                </VisibleScrollArea>
             </div>
 
 
@@ -696,6 +698,7 @@ const Bookings = () => {
                                 </table>
                             </div>
                             <p className="text-sm text-slate-500"><span className="font-semibold text-slate-700">Terms: </span>Balances must be settled before departure. This invoice is electronically generated by {agencyName}.</p>
+                            <AgencyBankDetailsBlock details={agencyBankDetails} variant="print" />
                         </div>
                     </div>
                 </div>

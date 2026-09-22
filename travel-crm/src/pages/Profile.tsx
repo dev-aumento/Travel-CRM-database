@@ -172,7 +172,8 @@ const Profile = () => {
     }
 
     return (
-        <div className="w-full space-y-6">
+        <div className="h-full min-h-0 w-full overflow-y-auto custom-scrollbar">
+            <div className="w-full space-y-6 pb-6">
             <div>
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight">Your Profile</h1>
                 <p className="text-slate-500 font-medium">Manage your personal information and account settings.</p>
@@ -304,7 +305,7 @@ const Profile = () => {
                         <div className="space-y-6">
                             <h3 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Activity Highlights</h3>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-100 group">
+                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 transition-all hover:bg-grey-50 hover:shadow-s hover:shadow-slate-50 group">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 group-hover:text-crm-500 transition-colors">Quotes Generated</p>
                                     <div className="flex items-baseline gap-2">
                                         <p className="text-3xl font-black text-slate-900">{activityStats.quotesGenerated}</p>
@@ -313,7 +314,7 @@ const Profile = () => {
                                         {userRole === 'admin' ? 'All agency quotations' : 'Quotations in your portfolio'}
                                     </p>
                                 </div>
-                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-100 group">
+                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 transition-all hover:bg-grey-50 hover:shadow-s hover:shadow-slate-50 group">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 group-hover:text-crm-500 transition-colors">Success Rate</p>
                                     <div className="flex items-baseline gap-2">
                                         <p className="text-3xl font-black text-slate-900">
@@ -332,6 +333,7 @@ const Profile = () => {
                         </div>
                     </div>
                 </div>
+            </div>
             </div>
         </div>
     );

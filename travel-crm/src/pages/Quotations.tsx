@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import NumberInput from '../components/NumberInput';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, Send, Download, Calculator, Plus, User, MapPin, CheckCircle2, Calendar, Globe, X, ChevronDown, ArrowLeft, ArrowRight, Search, GripVertical, Trash2, Edit3, Filter, Briefcase, Hotel as HotelIcon, Copy, AlertCircle, Mail } from 'lucide-react';
-import { buildNightPricesForStay, formatHotelNightDateLabel, getHotelSelectionIncompleteMessage, isHotelSelectionComplete, sumStayExtraBedTotal, sumStayGivenTotal, sumStayHotelTotal, sumStaySpecialInclusionsTotal, type HotelNightPrice } from '../utils/hotelStayPricing';
+import { FileText, Send, Download, Calculator, Plus, User, MapPin, CheckCircle2, Calendar, Globe, X, ChevronDown, ArrowLeft, ArrowRight, Search, GripVertical, Trash2, Edit3, Filter, Briefcase, Hotel as HotelIcon, Copy, Mail } from 'lucide-react';
+import { buildNightPricesForStay, formatHotelNightDateLabel, getHotelSelectionIncompleteMessage, isHotelSelectionComplete, stayMissingExtraBedPrice, sumStayChildWithBedTotal, sumStayChildWithoutBedTotal, sumStayExtraBedTotal, sumStayGivenTotal, sumStayHotelTotal, sumStaySpecialInclusionsTotal, type HotelNightPrice } from '../utils/hotelStayPricing';
 import { collectReferenceIds, ensureHotelBookingId, ensureTripId } from '../utils/hotelBookingIds';
 import {
     filterStaffForAgentSession,
@@ -25,6 +26,7 @@ import QuoteTermsSection from '../components/QuoteTermsSection';
 import QuoteBuilderReviewPreview from '../components/QuoteBuilderReviewPreview';
 import DropdownChevron from '../components/DropdownChevron';
 import CountryFlag from '../components/CountryFlag';
+import CountryGroupedOptions from '../components/CountryGroupedOptions';
 import {
     appendQuoteActivityEntry,
     bootstrapLeadQuoteDestination,
@@ -55,6 +57,7 @@ import {
     getFallbackTermsRecord,
 } from '../utils/quoteTerms';
 import QuoteTermsSelector from '../components/QuoteTermsSelector';
+import AgencyBankDetailsBlock from '../components/AgencyBankDetailsBlock';
 import QuoteAdditionalServiceChargeSection, {
     buildAdditionalServiceChargePayload,
     normalizeAdditionalServiceCharge,
@@ -71,6 +74,7 @@ import {
     type QuoteEmailDraft,
     type QuoteEmailSender,
 } from '../utils/quoteShare';
+import { resolveAgencyBankDetails } from '../utils/agencyBankDetails';
 import { useDatabase } from '../context/DatabaseContext';
 import { packagePresets, calculateQuote, parseDurationNights, parseTravelers } from '../utils/pricing';
 import { mergeActivityCatalog } from '../utils/activityData';
@@ -93,6 +97,7 @@ import {
     resolveChildQuoteVersion,
     resolveNextPrimaryQuoteVersion,
     resolveQuoteHistoryDate,
+    resolveQuoteTimestamp,
 } from '../utils/quoteActivities';
 import {
     COUNTRY_PHONE_DATA,
@@ -138,6 +143,25 @@ const normalizeAdditionalActivities = (raw: unknown): QuoteAdditionalActivity[] 
         description: String(row?.description ?? ''),
         rate: Math.max(0, Number(row?.rate) || 0),
     }));
+};
+
+/** Newest-first sort key for Priority Desk leads. */
+const leadRecencyTs = (lead: any): number => {
+    const raw = lead?.createdAt || lead?.updatedAt || lead?.joinedDate || '';
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : 0;
+};
+
+/** Newest-first sort key for Quotation History (full timestamp, not calendar-day only). */
+const quoteRecencyTs = (quote: any): number => {
+    const raw =
+        quote?.createdAt ||
+        quote?.savedAt ||
+        quote?.updatedAt ||
+        resolveQuoteTimestamp(quote) ||
+        '';
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : 0;
 };
 
 const buildDefaultItinerary = (days: number) => {
@@ -258,14 +282,63 @@ const getActivityAssignmentKey = (act: any): string => {
     return `title:${String(act.title || act.name || '').trim().toLowerCase()}`;
 };
 
+/** Free Day can be assigned to multiple itinerary days. */
+const isFreeDayActivity = (act: any): boolean => {
+    const id = String(act?.id || '').trim().toUpperCase();
+    if (id === 'GLOBAL-1') return true;
+    const title = String(act?.title || act?.name || '').toLowerCase();
+    return title.includes('free day') || title.includes('exploring on your own');
+};
+
 const getAssignedActivityKeys = (itinerary: any[]): Set<string> => {
     const keys = new Set<string>();
     itinerary.forEach((day) => {
         (day.activities || []).forEach((act: any) => {
+            if (isFreeDayActivity(act)) return;
             keys.add(getActivityAssignmentKey(act));
         });
     });
     return keys;
+};
+
+/** Ground transport for activity days — no flights or trains. */
+const ITINERARY_VEHICLE_TYPES = [
+    'Bus',
+    'Car',
+    'Bike',
+    'Scooter',
+    'Van / Minibus',
+    'Auto Rickshaw',
+    'Other',
+] as const;
+
+const ITINERARY_CAR_TYPES = [
+    'Sedan',
+    'SUV',
+    'XUV',
+    'Hatchback',
+    'Luxury',
+    'Limousine',
+    'Minivan',
+    'Tempo Traveller',
+] as const;
+
+const formatItineraryVehicleLabel = (
+    vehicleType?: string,
+    carType?: string,
+    otherLabel?: string
+): string => {
+    const type = String(vehicleType || '').trim();
+    if (!type) return '';
+    if (type === 'Car') {
+        const car = String(carType || '').trim();
+        return car ? `Car — ${car}` : 'Car';
+    }
+    if (type === 'Other') {
+        const other = String(otherLabel || '').trim();
+        return other ? `Other — ${other}` : 'Other';
+    }
+    return type;
 };
 
 const Quotations = () => {
@@ -281,6 +354,10 @@ const Quotations = () => {
     const agencyBranding = useAgencyBranding();
     const agencyName = agencyBranding.name;
     const agencySettings = agencyBranding.settings;
+    const agencyBankDetails = useMemo(
+        () => resolveAgencyBankDetails(agencySettings),
+        [agencySettings]
+    );
     const [searchParams, setSearchParams] = useSearchParams();
     
     // Auth context
@@ -498,8 +575,8 @@ const Quotations = () => {
                 const latestTs = (quotes: any[]) =>
                     Math.max(
                         0,
-                        ...expandQuoteVersionFamily(quotes, quotationsForHistory).map(
-                            (q) => resolveQuoteHistoryDate(q, leads)?.getTime() || 0
+                        ...expandQuoteVersionFamily(quotes, quotationsForHistory).map((q) =>
+                            quoteRecencyTs(q)
                         )
                     );
                 return latestTs(b.quotes) - latestTs(a.quotes);
@@ -532,24 +609,30 @@ const Quotations = () => {
     );
 
     const workbenchLead = useMemo(() => {
-        if (leadContext) return leadContext;
-        if (!selectedQuote) return null;
-        return (
-            findLeadForQuote(selectedQuote, leads) || {
-                id: selectedQuote.leadId || getQuoteLeadGroupKey(selectedQuote, leads),
-                name: selectedQuote.customer,
-                destination: selectedQuote.destination,
-                duration: selectedQuote.duration,
-                travelers: selectedQuote.travelers,
-                status: 'itinerary',
-                agentName: selectedQuote.agentName,
-                agentId: selectedQuote.agentId,
-                phone: selectedQuote.phone,
-                email: selectedQuote.email || selectedQuote.customerEmail,
-                trackingId: selectedQuote.trackingId || selectedQuote.tripId,
-                tripId: selectedQuote.tripId || selectedQuote.trackingId,
-            }
-        );
+        const fromQuote = selectedQuote
+            ? findLeadForQuote(selectedQuote, leads) || {
+                  id: selectedQuote.leadId || getQuoteLeadGroupKey(selectedQuote, leads),
+                  name: selectedQuote.customer,
+                  destination: selectedQuote.destination,
+                  duration: selectedQuote.duration,
+                  travelers: selectedQuote.travelers,
+                  status: 'itinerary',
+                  agentName: selectedQuote.agentName,
+                  agentId: selectedQuote.agentId,
+                  phone: selectedQuote.phone,
+                  email: selectedQuote.email || selectedQuote.customerEmail,
+                  trackingId: selectedQuote.trackingId || selectedQuote.tripId,
+                  tripId: selectedQuote.tripId || selectedQuote.trackingId,
+              }
+            : null;
+        const base = leadContext || fromQuote;
+        if (!base) return null;
+        // Always prefer the live lead record so status (e.g. confirmed) stays in sync
+        if (base.id) {
+            const fresh = leads.find((l: any) => l.id === base.id);
+            if (fresh) return { ...base, ...fresh };
+        }
+        return base;
     }, [leadContext, selectedQuote, leads]);
 
     const workbenchLeadQuotes = useMemo(() => {
@@ -597,10 +680,12 @@ const Quotations = () => {
 
     const priorityDeskNewLeads = useMemo(
         () =>
-            leads.filter(
-                (lead: any) =>
-                    ['new', 'contacted'].includes(lead.status) && passesLeadDeskFilters(lead)
-            ),
+            leads
+                .filter(
+                    (lead: any) =>
+                        ['new', 'contacted'].includes(lead.status) && passesLeadDeskFilters(lead)
+                )
+                .sort((a: any, b: any) => leadRecencyTs(b) - leadRecencyTs(a)),
         [leads, passesLeadDeskFilters]
     );
 
@@ -619,7 +704,9 @@ const Quotations = () => {
             byId.set(resolved.id, resolved);
         });
 
-        return Array.from(byId.values());
+        return Array.from(byId.values()).sort(
+            (a: any, b: any) => leadRecencyTs(b) - leadRecencyTs(a)
+        );
     }, [leads, quotationsForHistory, passesLeadDeskFilters, isPriorityDeskActiveLead]);
 
     const [priorityDeskVisibleCount, setPriorityDeskVisibleCount] = useState(SIDEBAR_LIST_INITIAL_COUNT);
@@ -693,11 +780,16 @@ const Quotations = () => {
         hotelId: string;
         nights: number;
         hotelInput?: string;
+        city?: string;
         roomType?: string;
         rooms?: number;
         personsPerRoom?: number;
         extraBed?: number;
         extraBedPrice?: number;
+        childWithBed?: number;
+        childWithBedPrice?: number;
+        childWithoutBed?: number;
+        childWithoutBedPrice?: number;
         mealPlan?: string;
         nightPrices?: HotelNightPrice[];
         hotelBookingId?: string;
@@ -706,6 +798,8 @@ const Quotations = () => {
     }>>([]);
     const [formTripId, setFormTripId] = useState('');
     const [hotelSelectionConfirmed, setHotelSelectionConfirmed] = useState(false);
+    const [hotelValidationAttempted, setHotelValidationAttempted] = useState(false);
+    const [itineraryValidationAttempted, setItineraryValidationAttempted] = useState(false);
     const [formQuoteNotes, setFormQuoteNotes] = useState('');
     const [formAdditionalActivities, setFormAdditionalActivities] = useState<QuoteAdditionalActivity[]>([]);
     const [formAdditionalServiceCharge, setFormAdditionalServiceCharge] =
@@ -713,8 +807,8 @@ const Quotations = () => {
             enabled: false,
             percent: 0,
             fixedAmount: 0,
-            gstEnabled: false,
-            gstPercent: 0,
+            gstOnPackageEnabled: false,
+            gstOnAdditionalEnabled: false,
         });
     const [formTermsId, setFormTermsId] = useState('');
     const termsManuallySelectedRef = useRef(false);
@@ -723,7 +817,7 @@ const Quotations = () => {
     const [builderCountry, setBuilderCountry] = useState('');
     const [builderCity, setBuilderCity] = useState('');
     const [builderCountrySearch, setBuilderCountrySearch] = useState('');
-    const [openCityDropdown, setOpenCityDropdown] = useState(false);
+    const [openCityDropdown, setOpenCityDropdown] = useState<number | null>(null);
     const [isRegionDropdownOpen, setIsRegionDropdownOpen] = useState(false);
     const [isSourceCountryDropdownOpen, setIsSourceCountryDropdownOpen] = useState(false);
     const [sourceCountrySearch, setSourceCountrySearch] = useState('');
@@ -733,6 +827,15 @@ const Quotations = () => {
 
     // Activity Vault & Drag State
     const [activitySearch, setActivitySearch] = useState('');
+    const [showNewActivityForm, setShowNewActivityForm] = useState(false);
+    const [newActivityTitle, setNewActivityTitle] = useState('');
+    const [newActivityPrice, setNewActivityPrice] = useState(0);
+    const [newActivityCategory, setNewActivityCategory] = useState('Leisure');
+    const [newActivityDescription, setNewActivityDescription] = useState('');
+    const [newActivityError, setNewActivityError] = useState('');
+    /** Tablet: which day index is picking an activity from the popup (null = closed). */
+    const [activityPickerDayIndex, setActivityPickerDayIndex] = useState<number | null>(null);
+    const [activityPickerSearch, setActivityPickerSearch] = useState('');
     const [expandedLeads, setExpandedLeads] = useState<Set<string>>(new Set());
     const [highlightedQuoteId, setHighlightedQuoteId] = useState('');
 
@@ -744,6 +847,10 @@ const Quotations = () => {
     };
     const [draggedActivity, setDraggedActivity] = useState<any>(null);
     const [formItinerary, setFormItinerary] = useState<any[]>(INITIAL_BUILDER.itinerary);
+    const [formVehicleType, setFormVehicleType] = useState('');
+    const [formCarType, setFormCarType] = useState('');
+    const [formVehicleOther, setFormVehicleOther] = useState('');
+    const [formVehiclePrice, setFormVehiclePrice] = useState(0);
     const [builderStep, setBuilderStep] = useState<'customer' | 'hotel' | 'itinerary' | 'additional' | 'review'>('customer');
 
     const builderSteps = [
@@ -769,13 +876,13 @@ const Quotations = () => {
     };
 
     const confirmHotelSelection = () => {
+        setHotelValidationAttempted(true);
         const incompleteMessage = getHotelSelectionIncompleteMessage(
             formHotelStays,
             effectiveNights,
             formDepartureDate
         );
         if (incompleteMessage) {
-            alert(incompleteMessage);
             return;
         }
         const taken = collectReferenceIds(db);
@@ -794,6 +901,7 @@ const Quotations = () => {
         setFormTripId(tripId);
         setFormHotelStays(assignHotelBookingReferences(formHotelStays, tripId));
         setHotelSelectionConfirmed(true);
+        setHotelValidationAttempted(false);
         setBuilderStep('itinerary');
     };
 
@@ -850,6 +958,17 @@ const Quotations = () => {
             setBuilderStep('customer');
             return;
         }
+        if (
+            builderStep === 'itinerary' &&
+            ['additional', 'review'].includes(targetId) &&
+            !isItineraryActivitiesComplete
+        ) {
+            setItineraryValidationAttempted(true);
+            return;
+        }
+        if (targetId !== 'itinerary') {
+            setItineraryValidationAttempted(false);
+        }
         setBuilderStep(targetId);
     };
 
@@ -868,6 +987,11 @@ const Quotations = () => {
             return;
         }
         if (builderStep === 'itinerary') {
+            if (!isItineraryActivitiesComplete) {
+                setItineraryValidationAttempted(true);
+                return;
+            }
+            setItineraryValidationAttempted(false);
             navigateToBuilderStep('additional');
             return;
         }
@@ -903,12 +1027,11 @@ const Quotations = () => {
                         <button
                             type="button"
                             onClick={confirmHotelSelection}
-                            disabled={!canConfirmHotelSelection}
                             title={
                                 hotelSelectionIncompleteMessage ||
                                 'Confirm hotel stays for the full package duration'
                             }
-                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-black uppercase tracking-wide shadow-md whitespace-nowrap shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
+                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-black uppercase tracking-wide shadow-md whitespace-nowrap shrink-0"
                         >
                             <CheckCircle2 size={18} className="shrink-0" />
                             Confirm Hotel Selection
@@ -916,7 +1039,17 @@ const Quotations = () => {
                     ),
                 };
             case 'itinerary':
-                return { nextLabel: 'Next: Additional Fields' };
+                return {
+                    nextLabel: 'Next: Additional Fields',
+                    onNext: () => {
+                        if (!isItineraryActivitiesComplete) {
+                            setItineraryValidationAttempted(true);
+                            return;
+                        }
+                        setItineraryValidationAttempted(false);
+                        navigateToBuilderStep('additional');
+                    },
+                };
             case 'additional':
                 return { nextLabel: 'Next: Final Review' };
             case 'review':
@@ -929,12 +1062,13 @@ const Quotations = () => {
     const renderBuilderStepFooter = () => {
         const nav = getBuilderStepNavConfig();
         return (
-            <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
-                <div className="flex items-center w-full gap-4">
+            <div className="shrink-0 border-t border-slate-200 bg-white px-4 sm:px-6 py-4">
+                {/* Tablet: Confirm above nav buttons; desktop: Cancel | Previous | Confirm | Next */}
+                <div className="flex flex-wrap items-center w-full gap-3 lg:gap-4">
                     <button
                         type="button"
                         onClick={cancelNewQuotation}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors whitespace-nowrap shrink-0"
+                        className="order-2 lg:order-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors whitespace-nowrap shrink-0"
                     >
                         <X size={16} className="shrink-0" />
                         <span>Cancel</span>
@@ -943,28 +1077,30 @@ const Quotations = () => {
                         type="button"
                         onClick={goToPrevBuilderStep}
                         disabled={builderStep === 'customer'}
-                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                        className="order-3 lg:order-2 inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
                     >
                         <ArrowLeft size={16} className="shrink-0" />
                         <span>Previous Step</span>
                     </button>
                     {nav.extra ? (
-                        <div className="flex-1 flex justify-center min-w-0 overflow-hidden">{nav.extra}</div>
+                        <div className="order-1 lg:order-3 basis-full lg:basis-auto w-full lg:w-auto lg:flex-1 flex justify-center">
+                            {nav.extra}
+                        </div>
                     ) : (
-                        <div className="flex-1 min-w-0" aria-hidden />
+                        <div className="hidden lg:block lg:order-3 lg:flex-1 min-w-0" aria-hidden />
                     )}
                     {!nav.hideNext ? (
                         <button
                             type="button"
                             onClick={nav.onNext || goToNextBuilderStep}
                             disabled={nav.disableNext}
-                            className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold shadow-md shadow-crm-200 transition-all active:scale-95 whitespace-nowrap shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-crm-600"
+                            className="order-4 ml-auto lg:ml-0 inline-flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold shadow-md shadow-crm-200 transition-all active:scale-95 whitespace-nowrap shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-crm-600"
                         >
                             <span>{nav.nextLabel}</span>
                             <ArrowRight size={16} className="shrink-0" />
                         </button>
                     ) : (
-                        <div className="shrink-0 w-px" aria-hidden />
+                        <div className="order-4 ml-auto lg:ml-0 shrink-0 w-px" aria-hidden />
                     )}
                 </div>
             </div>
@@ -1020,8 +1156,12 @@ const Quotations = () => {
         const preset = pricing.preset;
         const selectedHotel = (db?.hotels?.data || []).find((h: any) => h.id === formHotelId);
 
-        const depDate = formDepartureDate ? new Date(formDepartureDate) : new Date();
-        const dateDisplay = depDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        // Quote issue/created date (not trip departure — that lives in departureDate)
+        const dateDisplay = new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
 
         const newQuoteId = getNextId('quotations', 'QT-2026');
 
@@ -1091,8 +1231,8 @@ const Quotations = () => {
         const items = appendServiceChargeAndGstLineItems(
             baseItems,
             financials.additionalServiceChargeAmount,
-            financials.taxes,
-            formAdditionalServiceCharge.gstPercent
+            financials.gstOnPackage || 0,
+            financials.gstOnAdditional || 0
         );
 
         const newQuote = {
@@ -1149,6 +1289,11 @@ const Quotations = () => {
                 mealCharge: pricing.mealCharge
             },
             itinerary: formItinerary,
+            transportation: itineraryVehicleLabel || null,
+            vehicleType: formVehicleType || null,
+            carType: formVehicleType === 'Car' ? formCarType || null : null,
+            vehicleOther: formVehicleType === 'Other' ? formVehicleOther || null : null,
+            vehiclePrice: Math.max(0, Number(formVehiclePrice) || 0),
             items,
             tripMode,
             source: tripMode === 'package' ? 'Quotation' : 'Custom Trip',
@@ -1271,11 +1416,16 @@ const Quotations = () => {
                             hotelId: s.hotelId,
                             nights: Number(s.nights),
                             hotelInput: hotel?.name || '',
+                            city: s.city || builderCity || '',
                             roomType: s.roomType || '',
                             rooms: Number(s.rooms || 1),
                             personsPerRoom: Number(s.personsPerRoom || 2),
                             extraBed: Number(s.extraBed || 0),
                             extraBedPrice: Number(s.extraBedPrice || 0),
+                            childWithBed: Number(s.childWithBed || 0),
+                            childWithBedPrice: Number(s.childWithBedPrice || 0),
+                            childWithoutBed: Number(s.childWithoutBed || 0),
+                            childWithoutBedPrice: Number(s.childWithoutBedPrice || 0),
                             mealPlan: s.mealPlan || '',
                             nightPrices: Array.isArray(s.nightPrices) ? s.nightPrices : undefined,
                             hotelBookingId: s.hotelBookingId || s.bookingCnf,
@@ -1298,10 +1448,16 @@ const Quotations = () => {
                 hotelId: q.hotelId,
                 nights: defaultNights,
                 hotelInput: hotel?.name || '',
+                city: builderCity || '',
                 roomType: '',
                 rooms: 1,
                 personsPerRoom: 2,
                 extraBed: 0,
+                extraBedPrice: 0,
+                childWithBed: 0,
+                childWithBedPrice: 0,
+                childWithoutBed: 0,
+                childWithoutBedPrice: 0,
                 mealPlan: q.hotelMealPlan || '',
             }]);
         } else {
@@ -1347,6 +1503,40 @@ const Quotations = () => {
             (presetFromQuote?.duration ? parseDurationNights(presetFromQuote.duration) + 1 : 1);
 
         setFormItinerary(normalizeItinerary(q.itinerary, desiredDays));
+
+        const savedVehicleType = String(q.vehicleType || '').trim();
+        if (savedVehicleType) {
+            setFormVehicleType(savedVehicleType);
+            setFormCarType(String(q.carType || '').trim());
+            setFormVehicleOther(String(q.vehicleOther || '').trim());
+        } else {
+            const transport = String(q.transportation || '').trim();
+            if (transport.startsWith('Car')) {
+                setFormVehicleType('Car');
+                const car = transport.includes('—')
+                    ? transport.split('—').slice(1).join('—').trim()
+                    : '';
+                setFormCarType(car);
+                setFormVehicleOther('');
+            } else if (transport.startsWith('Other')) {
+                setFormVehicleType('Other');
+                setFormCarType('');
+                setFormVehicleOther(
+                    transport.includes('—')
+                        ? transport.split('—').slice(1).join('—').trim()
+                        : ''
+                );
+            } else if (ITINERARY_VEHICLE_TYPES.includes(transport as any)) {
+                setFormVehicleType(transport);
+                setFormCarType('');
+                setFormVehicleOther('');
+            } else {
+                setFormVehicleType('');
+                setFormCarType('');
+                setFormVehicleOther('');
+            }
+        }
+        setFormVehiclePrice(Math.max(0, Number(q.vehiclePrice) || 0));
 
         const quoteNights = Math.max(1, parseDurationNights(q.duration) || desiredDays - 1);
         setFormTripDurationUnit('nights');
@@ -1679,7 +1869,7 @@ const Quotations = () => {
     }, [builderCountry, builderCity, leadContext, allPresets, livePreset, customDestination]);
 
     const applyBuilderDestinationSelection = useCallback(
-        (country: string, city: string) => {
+        (country: string, city: string = '') => {
             const resolved = resolveBuilderDestinationFromCountry(country, allPresets, city);
             const nextDestination = city.trim()
                 ? formatDestinationLabel(city, country)
@@ -1715,6 +1905,7 @@ const Quotations = () => {
             setBuilderCountry(country);
             setBuilderCity('');
             setBuilderCountrySearch('');
+            setOpenCityDropdown(null);
             setIsRegionDropdownOpen(false);
             applyBuilderDestinationSelection(country, '');
         },
@@ -1728,6 +1919,35 @@ const Quotations = () => {
             applyBuilderDestinationSelection(builderCountry, city);
         },
         [applyBuilderDestinationSelection, builderCountry]
+    );
+
+    const createCityByName = useCallback(
+        (cityName: string) => {
+            const normalized = String(cityName || '').trim();
+            const country = resolveWorldCountryName(builderCountry);
+            if (!normalized || !country) return;
+
+            const alreadyListed = builderCityOptions.some(
+                (city) => city.toLowerCase() === normalized.toLowerCase()
+            );
+            if (alreadyListed) return;
+
+            const existsInDb = (db?.destinations?.data || []).some((dest: any) => {
+                const destCity = String(dest.name || '').trim().toLowerCase();
+                const destCountry = resolveWorldCountryName(dest.country || '').toLowerCase();
+                return destCity === normalized.toLowerCase() && destCountry === country.toLowerCase();
+            });
+            if (existsInDb) return;
+
+            addRecord('destinations', {
+                id: getNextId('destinations', 'DEST'),
+                name: normalized,
+                country,
+                flag: '🌐',
+                status: 'Active',
+            });
+        },
+        [addRecord, builderCityOptions, builderCountry, db?.destinations?.data, getNextId]
     );
 
     const effectivePresetId =
@@ -1814,8 +2034,30 @@ const Quotations = () => {
         }
         el.focus();
     };
+    const itineraryVehicleLabel = formatItineraryVehicleLabel(
+        formVehicleType,
+        formCarType,
+        formVehicleOther
+    );
     const currentStayNights = formHotelStays.reduce((sum, s) => sum + Number(s.nights || 0), 0);
     const remainingStayNights = Math.max(0, effectiveNights - currentStayNights);
+    const hotelsStayGrandTotal = formHotelStays.reduce((sum, stay) => sum + sumStayHotelTotal(stay), 0);
+    const itineraryActivitiesTotal = formItinerary.reduce(
+        (sum, day) =>
+            sum +
+            (day.activities || []).reduce(
+                (daySum: number, act: any) => daySum + (Number(act.customPrice) || 0),
+                0
+            ),
+        0
+    );
+    const itineraryVehicleCost = Math.max(0, Number(formVehiclePrice) || 0);
+    const itineraryGrandTotal = itineraryActivitiesTotal + itineraryVehicleCost;
+    const daysMissingActivities = formItinerary.filter(
+        (day) => !(day.activities || []).length
+    );
+    const isItineraryActivitiesComplete =
+        formItinerary.length > 0 && daysMissingActivities.length === 0;
     const canConfirmHotelSelection = isHotelSelectionComplete(
         formHotelStays,
         effectiveNights,
@@ -1833,12 +2075,30 @@ const Quotations = () => {
             setHotelSelectionConfirmed(false);
         }
     }, [hotelSelectionConfirmed, canConfirmHotelSelection]);
+
+    useEffect(() => {
+        if (!itineraryValidationAttempted) return;
+        if (isItineraryActivitiesComplete) {
+            setItineraryValidationAttempted(false);
+        }
+    }, [itineraryValidationAttempted, isItineraryActivitiesComplete]);
     const countryHotels = useMemo(() => {
+        const cityQ = String(builderCity || '').trim().toLowerCase();
         return (db?.hotels?.data || []).filter((h: any) => {
+            const label = String(h.location || h.destination || '').trim();
             if (!normalizedBuilderCountry) return true;
-            return matchesBuilderCountry(h.location || h.destination || '');
+            if (!matchesBuilderCountry(label)) return false;
+            if (!cityQ) return true;
+
+            const parts = parseDestinationParts(label);
+            const hotelCity = String(parts.city || '').trim().toLowerCase();
+            const raw = label.toLowerCase();
+            return (
+                (hotelCity && (hotelCity === cityQ || hotelCity.includes(cityQ) || cityQ.includes(hotelCity))) ||
+                raw.includes(cityQ)
+            );
         });
-    }, [db?.hotels?.data, normalizedBuilderCountry, matchesBuilderCountry]);
+    }, [db?.hotels?.data, normalizedBuilderCountry, matchesBuilderCountry, builderCity]);
 
     const findHotelByName = (name: string) => {
         const normalized = String(name || '').trim().toLowerCase();
@@ -1970,57 +2230,136 @@ const Quotations = () => {
         }
     };
 
-    const createActivityByName = (title: string) => {
-        const normalized = String(title || '').trim();
-        if (!normalized) return null;
+    const resetNewActivityForm = () => {
+        setNewActivityTitle('');
+        setNewActivityPrice(0);
+        setNewActivityCategory('Leisure');
+        setNewActivityDescription('');
+        setNewActivityError('');
+    };
+
+    const createActivityFromForm = () => {
+        const title = String(newActivityTitle || '').trim();
+        const country = String(builderCountry || '').trim();
+        const price = Math.max(0, Number(newActivityPrice) || 0);
+        const category = String(newActivityCategory || 'Leisure').trim() || 'Leisure';
+        const description = String(newActivityDescription || '').trim();
+
+        if (!country) {
+            setNewActivityError('Select a destination country in Customer Information first.');
+            return null;
+        }
+        if (!title) {
+            setNewActivityError('Activity title is required.');
+            return null;
+        }
+        if (!description) {
+            setNewActivityError('Description is required.');
+            return null;
+        }
+
         const existing = allActivities.find(
-            (a) => String(a.title || '').trim().toLowerCase() === normalized.toLowerCase()
+            (a) =>
+                String(a.title || '').trim().toLowerCase() === title.toLowerCase() &&
+                (matchesBuilderCountry(a.country || a.location || '') ||
+                    String(a.country || '').toLowerCase() === country.toLowerCase())
         );
-        if (existing) return existing;
+        if (existing) {
+            setNewActivityError('An activity with this title already exists for this destination.');
+            return existing;
+        }
 
         const newId = getNextId ? getNextId('activities', 'ACT') : `ACT-${Date.now()}`;
-        const country = builderCountry || 'Global';
         const activity = {
             id: newId,
-            title: normalized,
-            name: normalized,
+            title,
+            name: title,
             country,
             location: country,
-            price: 0,
-            priceNum: 0,
-            category: 'Custom',
-            description: 'Added from quotation builder',
+            price,
+            priceNum: price,
+            category,
+            description,
             duration: '4 Hours',
+            status: 'Active',
         };
         addRecord('activities', activity);
+        resetNewActivityForm();
+        setShowNewActivityForm(false);
         return activity;
     };
 
-    const createCityByName = (cityName: string) => {
-        const normalized = String(cityName || '').trim();
-        const country = resolveWorldCountryName(builderCountry);
-        if (!normalized || !country) return;
+    const addActivityToItineraryDay = useCallback(
+        (dayIdx: number, activity: any) => {
+            if (dayIdx < 0 || dayIdx >= formItinerary.length || !activity) return false;
+            const draggedKey = getActivityAssignmentKey(activity);
+            if (!isFreeDayActivity(activity)) {
+                const alreadyAssigned = formItinerary.some((day) =>
+                    (day.activities || []).some(
+                        (act: any) => getActivityAssignmentKey(act) === draggedKey
+                    )
+                );
+                if (alreadyAssigned) return false;
+            }
 
-        const alreadyListed = builderCityOptions.some(
-            (city) => city.toLowerCase() === normalized.toLowerCase()
-        );
-        if (alreadyListed) return;
+            setFormItinerary((prev) => {
+                const next = prev.map((day, i) => {
+                    if (i !== dayIdx) return day;
+                    return {
+                        ...day,
+                        activities: [
+                            ...(day.activities || []),
+                            {
+                                ...activity,
+                                customPrice: activity.price ?? activity.customPrice ?? 0,
+                                ...(isFreeDayActivity(activity)
+                                    ? {
+                                          allowTitleEdit: true,
+                                          instanceId: `${getActivityAssignmentKey(activity)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                                      }
+                                    : {}),
+                            },
+                        ],
+                    };
+                });
+                return next;
+            });
+            return true;
+        },
+        [formItinerary]
+    );
 
-        const existsInDb = (db?.destinations?.data || []).some((dest: any) => {
-            const destCity = String(dest.name || '').trim().toLowerCase();
-            const destCountry = resolveWorldCountryName(dest.country || '').toLowerCase();
-            return destCity === normalized.toLowerCase() && destCountry === country.toLowerCase();
+    const filteredVaultActivities = useMemo(() => {
+        const query = activitySearch.trim().toLowerCase();
+        return (allActivities || []).filter((act) => {
+            const countryStr = act.country || 'Global';
+            const countryMatch =
+                !builderCountry ||
+                countryStr === 'Global' ||
+                matchesBuilderCountry(countryStr);
+            const searchMatch =
+                !query ||
+                (act.title || '').toLowerCase().includes(query) ||
+                (act.category || '').toLowerCase().includes(query);
+            return countryMatch && searchMatch;
         });
-        if (existsInDb) return;
+    }, [allActivities, activitySearch, builderCountry, matchesBuilderCountry]);
 
-        addRecord('destinations', {
-            id: getNextId('destinations', 'DEST'),
-            name: normalized,
-            country,
-            flag: '🌐',
-            status: 'Active',
+    const filteredPickerActivities = useMemo(() => {
+        const query = activityPickerSearch.trim().toLowerCase();
+        return (allActivities || []).filter((act) => {
+            const countryStr = act.country || 'Global';
+            const countryMatch =
+                !builderCountry ||
+                countryStr === 'Global' ||
+                matchesBuilderCountry(countryStr);
+            const searchMatch =
+                !query ||
+                (act.title || '').toLowerCase().includes(query) ||
+                (act.category || '').toLowerCase().includes(query);
+            return countryMatch && searchMatch;
         });
-    };
+    }, [allActivities, activityPickerSearch, builderCountry, matchesBuilderCountry]);
 
     const createHotelByName = (name: string) => {
         const normalizedName = String(name || '').trim();
@@ -2029,12 +2368,16 @@ const Quotations = () => {
         if (existing) return existing.id;
 
         const newHotelId = getNextId ? getNextId('hotels', 'HOTEL') : `HOTEL-${Date.now()}`;
-        const fallbackCountry = builderCountry || livePreset.destination?.split(',').pop()?.trim() || 'Custom';
+        const fallbackCountry =
+            builderCountry || livePreset.destination?.split(',').pop()?.trim() || 'Custom';
+        const locationLabel = builderCity?.trim()
+            ? formatDestinationLabel(builderCity, fallbackCountry)
+            : fallbackCountry;
         addRecord('hotels', {
             id: newHotelId,
             name: normalizedName,
-            location: fallbackCountry,
-            destination: fallbackCountry,
+            location: locationLabel,
+            destination: locationLabel,
             standardRate: 10000,
             deluxeRate: 13000,
             luxuryRate: 18000,
@@ -2223,6 +2566,8 @@ const Quotations = () => {
             hotelTier: formHotelTier,
             hotelStays: formHotelStays,
             itinerary: formItinerary,
+            transportation: itineraryVehicleLabel || undefined,
+            vehicleType: formVehicleType || undefined,
             additionalActivities: normalizeAdditionalActivities(
                 formAdditionalActivities.filter((row) => row.title.trim())
             ),
@@ -2241,6 +2586,8 @@ const Quotations = () => {
             formHotelTier,
             formHotelStays,
             formItinerary,
+            itineraryVehicleLabel,
+            formVehicleType,
             formAdditionalActivities,
             formAdditionalServiceCharge,
             customFlightTotal,
@@ -2423,6 +2770,7 @@ const Quotations = () => {
             terms,
             trackingId,
             format: 'whatsapp',
+            bankDetails: agencyBankDetails,
         });
         openWhatsAppShare(quoteToShare.phone || linkedLead?.phone || '', message);
     };
@@ -2454,6 +2802,7 @@ const Quotations = () => {
             presets: [...packagePresets, ...customPresets],
             fromEmail: sender.fromEmail,
             currency: currencySetting,
+            bankDetails: agencyBankDetails,
         };
         const subject = buildQuoteEmailSubject(
             quoteToShare,
@@ -2478,8 +2827,12 @@ const Quotations = () => {
         if (!editingQuoteId || !selectedQuote) return;
 
         const parentQuote = selectedQuote;
-        const depDate = formDepartureDate ? new Date(formDepartureDate) : new Date();
-        const dateDisplay = depDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        // Quote issue/created date (not trip departure — that lives in departureDate)
+        const dateDisplay = new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
 
         const matchingLeadForTrip =
             leadContext ||
@@ -2572,8 +2925,8 @@ const Quotations = () => {
         const items = appendServiceChargeAndGstLineItems(
             baseItems,
             financials.additionalServiceChargeAmount,
-            financials.taxes,
-            formAdditionalServiceCharge.gstPercent
+            financials.gstOnPackage || 0,
+            financials.gstOnAdditional || 0
         );
 
         const revisedQuote = {
@@ -2601,6 +2954,11 @@ const Quotations = () => {
             agentId: formAgentId,
             agentName: formAgentName,
             itinerary: formItinerary,
+            transportation: itineraryVehicleLabel || null,
+            vehicleType: formVehicleType || null,
+            carType: formVehicleType === 'Car' ? formCarType || null : null,
+            vehicleOther: formVehicleType === 'Other' ? formVehicleOther || null : null,
+            vehiclePrice: Math.max(0, Number(formVehiclePrice) || 0),
             tripId,
             trackingId: tripId,
             hotelTier: formHotelTier,
@@ -2862,7 +3220,13 @@ const Quotations = () => {
         setFormHotelInput('');
         setFormHotelStays([]);
         setFormTripId('');
+        setFormVehicleType('');
+        setFormCarType('');
+        setFormVehicleOther('');
+        setFormVehiclePrice(0);
         setHotelSelectionConfirmed(false);
+        setHotelValidationAttempted(false);
+        setItineraryValidationAttempted(false);
         setFormTermsId('');
         termsManuallySelectedRef.current = false;
         setFormAgentId('');
@@ -2892,15 +3256,21 @@ const Quotations = () => {
         setFormHotelInput('');
         setFormHotelStays([]);
         setFormTripId('');
+        setFormVehicleType('');
+        setFormCarType('');
+        setFormVehicleOther('');
+        setFormVehiclePrice(0);
         setHotelSelectionConfirmed(false);
+        setHotelValidationAttempted(false);
+        setItineraryValidationAttempted(false);
         setFormQuoteNotes('');
         setFormAdditionalActivities([]);
         setFormAdditionalServiceCharge({
             enabled: false,
             percent: 0,
             fixedAmount: 0,
-            gstEnabled: false,
-            gstPercent: 0,
+            gstOnPackageEnabled: false,
+            gstOnAdditionalEnabled: false,
         });
         setFormTermsId('');
         termsManuallySelectedRef.current = false;
@@ -2966,7 +3336,10 @@ const Quotations = () => {
 
         setIsQuotePdfDownloading(true);
         try {
-            await downloadElementAsMultiPagePdf(el, filename);
+            await downloadElementAsMultiPagePdf(el, filename, {
+                backgroundColor: '#ffffff',
+                marginMm: 8,
+            });
         } catch (error) {
             console.error('Quote PDF download failed:', error);
         } finally {
@@ -2975,6 +3348,7 @@ const Quotations = () => {
     }, [editingQuote, selectedQuote, isQuotePdfDownloading]);
 
     const openLeadQuoteView = (quoteId: string, lead?: any) => {
+        setSidebarAccordionOpen(false);
         setIsCreating(false);
         setSelectedQuoteId(quoteId);
         setEditingQuoteId(null);
@@ -3185,12 +3559,16 @@ const Quotations = () => {
         ) {
             return;
         }
-        updateRecord('leads', workbenchLead.id, {
+        const leadPatch = {
             status: 'confirmed',
             confirmedQuoteId: quote.id,
             travelers: quote.travelers || workbenchLead.travelers,
             ...buildLeadScheduleFromQuote(quote),
-        });
+        };
+        updateRecord('leads', workbenchLead.id, leadPatch);
+        setLeadContext((prev: any) =>
+            prev?.id === workbenchLead.id ? { ...prev, ...leadPatch } : { ...workbenchLead, ...leadPatch }
+        );
         updateRecord('quotations', quote.id, {
             status: 'confirmed',
             leadId: workbenchLead.id,
@@ -3206,9 +3584,7 @@ const Quotations = () => {
             updateRecord,
             {
                 ...workbenchLead,
-                status: 'confirmed',
-                confirmedQuoteId: quote.id,
-                travelers: quote.travelers || workbenchLead.travelers,
+                ...leadPatch,
             },
             quote.id,
             addRecord,
@@ -3420,6 +3796,7 @@ const Quotations = () => {
                                                 setHotelSelectionConfirmed(false);
                                                 if (lead.customHotelRate) setCustomHotelRate(lead.customHotelRate);
 
+                                                setSidebarAccordionOpen(false);
                                                 setIsCreating(true);
                                                 setSelectedQuoteId(null);
                                             }}
@@ -3536,11 +3913,16 @@ const Quotations = () => {
                                                                         hotelId: s.hotelId,
                                                                         nights: Number(s.nights),
                                                                         hotelInput: hotel?.name || '',
+                                                                        city: s.city || builderCity || '',
                                                                         roomType: s.roomType || '',
                                                                         rooms: Number(s.rooms || 1),
                                                                         personsPerRoom: Number(s.personsPerRoom || 2),
                                                                         extraBed: Number(s.extraBed || 0),
                                                                         extraBedPrice: Number(s.extraBedPrice || 0),
+                                                                        childWithBed: Number(s.childWithBed || 0),
+                                                                        childWithBedPrice: Number(s.childWithBedPrice || 0),
+                                                                        childWithoutBed: Number(s.childWithoutBed || 0),
+                                                                        childWithoutBedPrice: Number(s.childWithoutBedPrice || 0),
                                                                         mealPlan: s.mealPlan || '',
                                                                     };
                                                                 })
@@ -3557,10 +3939,16 @@ const Quotations = () => {
                                                             hotelId: latestQuote.hotelId,
                                                             nights: quoteNights,
                                                             hotelInput: quoteHotel?.name || '',
+                                                            city: builderCity || '',
                                                             roomType: '',
                                                             rooms: 1,
                                                             personsPerRoom: 2,
                                                             extraBed: 0,
+                                                            extraBedPrice: 0,
+                                                            childWithBed: 0,
+                                                            childWithBedPrice: 0,
+                                                            childWithoutBed: 0,
+                                                            childWithoutBedPrice: 0,
                                                             mealPlan: latestQuote.hotelMealPlan || '',
                                                         }]);
                                                     } else {
@@ -3614,6 +4002,7 @@ const Quotations = () => {
 
                                                     setFormItinerary(normalizeItinerary(latestQuote?.itinerary, parentDesiredDays));
 
+                                                    setSidebarAccordionOpen(false);
                                                     setIsCreating(true);
                                                     setSelectedQuoteId(null);
                                                 }}
@@ -4024,8 +4413,7 @@ const Quotations = () => {
                                 <div className="grid grid-cols-2 gap-2">
                                     <div>
                                         <label className="form-label">Adults</label>
-                                        <input
-                                            type="number"
+                                        <NumberInput
                                             min={1}
                                             value={formAdults}
                                             onChange={e => setFormAdults(parseInt(e.target.value) || 1)}
@@ -4034,8 +4422,7 @@ const Quotations = () => {
                                     </div>
                                     <div>
                                         <label className="form-label">Kids</label>
-                                        <input
-                                            type="number"
+                                        <NumberInput
                                             min={0}
                                             value={formKids}
                                             onChange={e => {
@@ -4090,8 +4477,7 @@ const Quotations = () => {
                                         </select>
                                         <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                         </div>
-                                        <input
-                                            type="number"
+                                        <NumberInput
                                             min={1}
                                             max={60}
                                             value={formTripDurationValue}
@@ -4174,7 +4560,7 @@ const Quotations = () => {
                                             <label className="form-label">
                                                 Source Country
                                             </label>
-                                            <div className="relative z-[60]">
+                                            <div className="relative">
                                                 <button
                                                     type="button"
                                                     onClick={(e) => {
@@ -4215,28 +4601,12 @@ const Quotations = () => {
                                                                     />
                                                                 </div>
                                                             </div>
-                                                            <div className="p-2 space-y-1 max-h-[280px] overflow-y-auto custom-scrollbar">
-                                                                {filteredSourceCountryOptions.length > 0 ? (
-                                                                    filteredSourceCountryOptions.map((country) => (
-                                                                        <button
-                                                                            key={country}
-                                                                            type="button"
-                                                                            onClick={() => handleSourceCountrySelect(country)}
-                                                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
-                                                                                resolveWorldCountryName(formSourceCountry) === resolveWorldCountryName(country)
-                                                                                    ? 'bg-crm-50 text-crm-700'
-                                                                                    : 'hover:bg-slate-50 text-slate-700'
-                                                                            }`}
-                                                                        >
-                                                                            <CountryFlag country={country} size={20} />
-                                                                            <span className="text-sm font-bold truncate">{country}</span>
-                                                                        </button>
-                                                                    ))
-                                                                ) : (
-                                                                    <p className="px-3 py-4 text-center text-[11px] font-semibold text-slate-400">
-                                                                        No countries match your search
-                                                                    </p>
-                                                                )}
+                                                            <div className="p-2 max-h-[280px] overflow-y-auto custom-scrollbar">
+                                                                <CountryGroupedOptions
+                                                                    options={filteredSourceCountryOptions}
+                                                                    selected={formSourceCountry}
+                                                                    onSelect={handleSourceCountrySelect}
+                                                                />
                                                             </div>
                                                         </div>
                                                     </>
@@ -4287,8 +4657,7 @@ const Quotations = () => {
                                             <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">
                                                 {currencySymbol}
                                             </span>
-                                            <input
-                                                type="number"
+                                            <NumberInput
                                                 min={0}
                                                 step={priceInputStep}
                                                 value={customFlightTotal ? formatInputValue(customFlightTotal) : ''}
@@ -4351,7 +4720,7 @@ const Quotations = () => {
                                 )}
                                 <div className={`${tripMode === 'package' ? 'lg:col-span-1' : 'lg:col-span-1'}`}>
                                     <label className="form-label">Destination Country</label>
-                                    <div className="relative z-[60]">
+                                    <div className="relative z-[2]">
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -4360,7 +4729,7 @@ const Quotations = () => {
                                                 setIsRegionDropdownOpen(!isRegionDropdownOpen);
                                                 if (!isRegionDropdownOpen) setBuilderCountrySearch('');
                                             }}
-                                            className="w-full flex items-center justify-between px-4 py-[11px] bg-slate-50 border border-slate-200 rounded-2xl shadow-sm hover:border-crm-400 transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group relative z-[51]"
+                                            className="w-full flex items-center justify-between px-4 py-[11px] bg-slate-50 border border-slate-200 rounded-2xl shadow-sm hover:border-crm-400 transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group relative z-[2]"
                                         >
                                             <div className="flex items-center gap-2 overflow-hidden">
                                                 <CountryFlag country={builderCountry || null} size={22} global={!builderCountry} />
@@ -4388,132 +4757,17 @@ const Quotations = () => {
                                                             />
                                                         </div>
                                                     </div>
-                                                    <div className="p-2 space-y-1 max-h-[300px] overflow-y-auto custom-scrollbar">
-                                                        {filteredCountryOptions.length > 0 ? (
-                                                            filteredCountryOptions.map((c) => (
-                                                                <button
-                                                                    key={c}
-                                                                    type="button"
-                                                                    onClick={() => { handleBuilderCountrySelect(c); }}
-                                                                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${builderCountry === c ? 'bg-crm-50 text-crm-700' : 'hover:bg-slate-100 text-slate-600'}`}
-                                                                >
-                                                                    <CountryFlag country={c} size={22} />
-                                                                    <p className="text-[10px] font-black uppercase tracking-tight text-left">{c}</p>
-                                                                </button>
-                                                            ))
-                                                        ) : (
-                                                            <p className="px-3 py-4 text-center text-[11px] font-semibold text-slate-400">
-                                                                No countries match your search
-                                                            </p>
-                                                        )}
+                                                    <div className="p-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                                        <CountryGroupedOptions
+                                                            options={filteredCountryOptions}
+                                                            selected={builderCountry}
+                                                            onSelect={handleBuilderCountrySelect}
+                                                        />
                                                     </div>
                                                 </div>
                                             </>
                                         )}
                                     </div>
-                                </div>
-                                <div className={`${tripMode === 'package' ? 'lg:col-span-1' : 'lg:col-span-1'}`}>
-                                    <label className="form-label">City / Place</label>
-                                    <div className="relative">
-                                        <input
-                                            type="text"
-                                            value={builderCity}
-                                            disabled={!builderCountry}
-                                            onChange={(e) => {
-                                                handleBuilderCityChange(e.target.value);
-                                                setOpenCityDropdown(true);
-                                            }}
-                                            onFocus={() => {
-                                                if (builderCountry) setOpenCityDropdown(true);
-                                            }}
-                                            onBlur={() =>
-                                                window.setTimeout(() => {
-                                                    setOpenCityDropdown(false);
-                                                    const name = builderCity.trim();
-                                                    if (
-                                                        name &&
-                                                        builderCountry &&
-                                                        !builderCityOptions.some(
-                                                            (city) => city.toLowerCase() === name.toLowerCase()
-                                                        )
-                                                    ) {
-                                                        createCityByName(name);
-                                                    }
-                                                }, 120)
-                                            }
-                                            placeholder={builderCountry ? 'Select or type city / place' : 'Select a country first'}
-                                            className={`w-full py-[11px] border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 bg-slate-50 outline-none focus:border-crm-500 hover:bg-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                                                builderCity?.trim() ? 'pl-4 pr-16' : 'pl-4 pr-10'
-                                            }`}
-                                        />
-                                        <DropdownChevron
-                                            open={openCityDropdown && Boolean(builderCountry)}
-                                            size={14}
-                                            className={`absolute top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none ${
-                                                builderCity?.trim() ? 'right-9' : 'right-3'
-                                            }`}
-                                        />
-                                        {builderCity?.trim() && (
-                                            <button
-                                                type="button"
-                                                onMouseDown={(e) => e.preventDefault()}
-                                                onClick={() => {
-                                                    handleBuilderCityChange('');
-                                                    setOpenCityDropdown(false);
-                                                }}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-500 rounded-md hover:bg-red-50"
-                                                title="Clear city"
-                                            >
-                                                <X size={14} />
-                                            </button>
-                                        )}
-                                        {openCityDropdown && builderCountry && (
-                                            <div className="absolute z-[120] top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
-                                                {filteredCityOptions.map((city) => (
-                                                    <button
-                                                        key={city}
-                                                        type="button"
-                                                        onMouseDown={(e) => e.preventDefault()}
-                                                        onClick={() => {
-                                                            handleBuilderCityChange(city);
-                                                            setOpenCityDropdown(false);
-                                                        }}
-                                                        className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                                                    >
-                                                        {city}
-                                                    </button>
-                                                ))}
-                                                {builderCity.trim() &&
-                                                    !builderCityOptions.some(
-                                                        (city) => city.toLowerCase() === builderCity.trim().toLowerCase()
-                                                    ) && (
-                                                    <button
-                                                        type="button"
-                                                        onMouseDown={(e) => e.preventDefault()}
-                                                        onClick={() => {
-                                                            const name = builderCity.trim();
-                                                            createCityByName(name);
-                                                            handleBuilderCityChange(name);
-                                                            setOpenCityDropdown(false);
-                                                        }}
-                                                        className="w-full text-left px-3 py-2 text-sm font-bold text-crm-600 hover:bg-crm-50 border-t border-slate-100"
-                                                    >
-                                                        + Add &quot;{builderCity.trim()}&quot;
-                                                    </button>
-                                                )}
-                                                {!builderCity.trim() && filteredCityOptions.length === 0 && (
-                                                    <p className="px-3 py-3 text-[11px] font-semibold text-slate-400">
-                                                        Type a city or place name
-                                                    </p>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                    {builderCountry && (
-                                        <p className="text-[10px] text-slate-400 mt-1">
-                                            Major cities for {builderCountry} — or type your own.
-                                        </p>
-                                    )}
                                 </div>
                             </div>
                             )}
@@ -4621,7 +4875,7 @@ const Quotations = () => {
                                                 Total package nights: {effectiveNights} • Assigned: {currentStayNights} • Remaining: {remainingStayNights}
                                             </p>
                                             {!canConfirmHotelSelection && hotelSelectionIncompleteMessage && (
-                                                <p className="mt-1 text-[10px] font-semibold text-amber-600">
+                                                <p className={`mt-1 text-[10px] font-semibold ${hotelValidationAttempted ? 'text-rose-600' : 'text-amber-600'}`}>
                                                     {hotelSelectionIncompleteMessage}
                                                 </p>
                                             )}
@@ -4632,10 +4886,20 @@ const Quotations = () => {
                                                 const nightRows = getStayNightRows(idx);
                                                 const stayGivenTotal = sumStayGivenTotal(stay);
                                                 const extraBedTotal = sumStayExtraBedTotal(stay);
+                                                const childWithBedTotal = sumStayChildWithBedTotal(stay);
+                                                const childWithoutBedTotal = sumStayChildWithoutBedTotal(stay);
                                                 const inclusionsTotal = sumStaySpecialInclusionsTotal(stay);
                                                 const stayHotelTotal = sumStayHotelTotal(stay);
-                                                const rateColumnTotal = nightRows.reduce((s, r) => s + r.rate, 0);
                                                 const givenColumnTotal = nightRows.reduce((s, r) => s + r.given, 0);
+                                                const stayCityValue = String(stay.city ?? builderCity ?? '');
+                                                const childWithBedPriceInvalid =
+                                                    hotelValidationAttempted &&
+                                                    (stay.childWithBed || 0) > 0 &&
+                                                    !(Number(stay.childWithBedPrice) > 0);
+                                                const childWithoutBedPriceInvalid =
+                                                    hotelValidationAttempted &&
+                                                    (stay.childWithoutBed || 0) > 0 &&
+                                                    !(Number(stay.childWithoutBedPrice) > 0);
 
                                                 return (
                                                 <div key={`${idx}-${stay.hotelId}`} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
@@ -4646,33 +4910,156 @@ const Quotations = () => {
                                                                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
                                                                     Stay block {idx + 1} • {getStayDateLabel(idx)}
                                                                 </p>
-                                                                <div className="flex items-center gap-1">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateHotelStay(idx, { nights: Math.max(1, stay.nights - 1) })}
-                                                                        className="w-6 h-6 rounded border border-slate-200 text-xs font-black text-slate-500 hover:bg-slate-50"
-                                                                    >
-                                                                        −
-                                                                    </button>
-                                                                    <span className="text-[10px] font-bold text-slate-600 min-w-[52px] text-center">
-                                                                        {stay.nights}N
-                                                                    </span>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            if (remainingStayNights <= 0) return;
-                                                                            updateHotelStay(idx, { nights: stay.nights + 1 });
-                                                                        }}
-                                                                        disabled={remainingStayNights <= 0}
-                                                                        className="w-6 h-6 rounded border border-slate-200 text-xs font-black text-slate-500 hover:bg-slate-50 disabled:opacity-40"
-                                                                    >
-                                                                        +
-                                                                    </button>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-[minmax(0,7fr)_minmax(0,3fr)] gap-2 items-start">
+                                                                <div className="relative min-w-0">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">City / Place</p>
+                                                                    <div className="relative">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={stayCityValue}
+                                                                            disabled={!builderCountry}
+                                                                            onChange={(e) => {
+                                                                                const city = e.target.value;
+                                                                                updateHotelStay(idx, { city });
+                                                                                handleBuilderCityChange(city);
+                                                                                setOpenCityDropdown(idx);
+                                                                            }}
+                                                                            onFocus={() => {
+                                                                                if (builderCountry) setOpenCityDropdown(idx);
+                                                                            }}
+                                                                            onBlur={() =>
+                                                                                window.setTimeout(
+                                                                                    () => setOpenCityDropdown((prev) => (prev === idx ? null : prev)),
+                                                                                    120
+                                                                                )
+                                                                            }
+                                                                            placeholder={
+                                                                                builderCountry
+                                                                                    ? 'Search or select city / place'
+                                                                                    : 'Select destination country in Customer Information first'
+                                                                            }
+                                                                            className={`w-full py-2.5 border border-slate-200 rounded-lg text-sm font-semibold text-slate-800 bg-white outline-none focus:border-crm-500 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                                                stayCityValue.trim() ? 'pl-3 pr-16' : 'pl-3 pr-10'
+                                                                            }`}
+                                                                        />
+                                                                        <DropdownChevron
+                                                                            open={openCityDropdown === idx && Boolean(builderCountry)}
+                                                                            size={14}
+                                                                            className={`absolute top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none ${
+                                                                                stayCityValue.trim() ? 'right-9' : 'right-2.5'
+                                                                            }`}
+                                                                        />
+                                                                        {stayCityValue.trim() && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onMouseDown={(e) => e.preventDefault()}
+                                                                                onClick={() => {
+                                                                                    updateHotelStay(idx, { city: '' });
+                                                                                    handleBuilderCityChange('');
+                                                                                    setOpenCityDropdown(null);
+                                                                                }}
+                                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-500 rounded-md hover:bg-red-50"
+                                                                                title="Clear city"
+                                                                            >
+                                                                                <X size={14} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    {openCityDropdown === idx && builderCountry && (
+                                                                        <div className="absolute z-[120] top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                                                                            {filteredCityOptions.map((city) => (
+                                                                                <button
+                                                                                    key={city}
+                                                                                    type="button"
+                                                                                    onMouseDown={(e) => e.preventDefault()}
+                                                                                    onClick={() => {
+                                                                                        updateHotelStay(idx, { city });
+                                                                                        handleBuilderCityChange(city);
+                                                                                        setOpenCityDropdown(null);
+                                                                                    }}
+                                                                                    className={`w-full text-left px-3 py-2 text-sm font-semibold hover:bg-slate-50 ${
+                                                                                        stayCityValue.trim().toLowerCase() === city.toLowerCase()
+                                                                                            ? 'bg-crm-50 text-crm-700'
+                                                                                            : 'text-slate-700'
+                                                                                    }`}
+                                                                                >
+                                                                                    {city}
+                                                                                </button>
+                                                                            ))}
+                                                                            {stayCityValue.trim() &&
+                                                                                !builderCityOptions.some(
+                                                                                    (city) =>
+                                                                                        city.toLowerCase() ===
+                                                                                        stayCityValue.trim().toLowerCase()
+                                                                                ) && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onMouseDown={(e) => e.preventDefault()}
+                                                                                        onClick={() => {
+                                                                                            const name = stayCityValue.trim();
+                                                                                            createCityByName(name);
+                                                                                            updateHotelStay(idx, { city: name });
+                                                                                            handleBuilderCityChange(name);
+                                                                                            setOpenCityDropdown(null);
+                                                                                        }}
+                                                                                        className="w-full text-left px-3 py-2 text-sm font-bold text-crm-600 hover:bg-crm-50 border-t border-slate-100"
+                                                                                    >
+                                                                                        + Add &quot;{stayCityValue.trim()}&quot;
+                                                                                    </button>
+                                                                                )}
+                                                                            {!stayCityValue.trim() && filteredCityOptions.length === 0 && (
+                                                                                <p className="px-3 py-3 text-[11px] font-semibold text-slate-400">
+                                                                                    Type a city or place name
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                    {!builderCountry && (
+                                                                        <p className="mt-1 text-[10px] text-amber-600 font-semibold">
+                                                                            Select a destination country in Customer Information first.
+                                                                        </p>
+                                                                    )}
+                                                                    {builderCountry && (
+                                                                        <p className="mt-1 text-[10px] text-slate-400">
+                                                                            Top cities for {builderCountry}. Search or quick-add a new place.
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Nights</p>
+                                                                    <div className="flex items-center justify-center gap-2 h-[42px] px-1 rounded-lg border border-slate-200 bg-white">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateHotelStay(idx, { nights: Math.max(1, stay.nights - 1) })}
+                                                                            className="w-9 h-9 rounded-lg text-base font-black text-slate-600 hover:bg-slate-50 leading-none"
+                                                                            title="Decrease nights"
+                                                                        >
+                                                                            −
+                                                                        </button>
+                                                                        <span className="text-[10px] font-bold text-slate-800 min-w-[2.5rem] text-center tabular-nums">
+                                                                            {stay.nights}N
+                                                                        </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (remainingStayNights <= 0) return;
+                                                                                updateHotelStay(idx, { nights: stay.nights + 1 });
+                                                                            }}
+                                                                            disabled={remainingStayNights <= 0}
+                                                                            className="w-9 h-9 rounded-lg text-base font-black text-slate-600 hover:bg-slate-50 leading-none disabled:opacity-40"
+                                                                            title="Increase nights"
+                                                                        >
+                                                                            +
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
 
-                                                            <div className="relative w-full md:w-1/2">
-                                                                <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Hotel</p>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                <div className="relative">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Hotel</p>
                                                                 <div className="relative">
                                                                     <input
                                                                         type="text"
@@ -4729,6 +5116,12 @@ const Quotations = () => {
                                                                 )}
                                                                 {openHotelDropdown === idx && (
                                                                     <div className="absolute z-[120] top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                                                                        {stayCityValue?.trim() && (
+                                                                            <div className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 bg-slate-50">
+                                                                                Hotels in {stayCityValue}
+                                                                                {builderCountry ? `, ${builderCountry}` : ''}
+                                                                            </div>
+                                                                        )}
                                                                         {searchHotelsByName(stay.hotelInput || '').map((h: any) => (
                                                                             <button
                                                                                 key={h.id}
@@ -4740,9 +5133,21 @@ const Quotations = () => {
                                                                                 }}
                                                                                 className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                                                                             >
-                                                                                {h.name}
+                                                                                <span className="block">{h.name}</span>
+                                                                                {(h.location || h.destination) && (
+                                                                                    <span className="text-[10px] font-medium text-slate-400">
+                                                                                        {h.location || h.destination}
+                                                                                    </span>
+                                                                                )}
                                                                             </button>
                                                                         ))}
+                                                                        {searchHotelsByName(stay.hotelInput || '').length === 0 && (
+                                                                            <p className="px-3 py-3 text-[11px] font-semibold text-slate-400">
+                                                                                {stayCityValue?.trim()
+                                                                                    ? `No hotels found for ${stayCityValue}. Add a new hotel below.`
+                                                                                    : 'No hotels match. Add a new hotel below.'}
+                                                                            </p>
+                                                                        )}
                                                                         <button
                                                                             type="button"
                                                                             disabled={!stay.hotelInput?.trim()}
@@ -4775,44 +5180,8 @@ const Quotations = () => {
                                                                 )}
                                                             </div>
 
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                                 <div className="relative">
-                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Meal Plan</p>
-                                                                    <div className="relative crm-select-wrap">
-                                                                        <select
-                                                                            value={stay.mealPlan || ''}
-                                                                            onChange={(e) => updateHotelStay(idx, { mealPlan: e.target.value })}
-                                                                            className={`w-full py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white appearance-none cursor-pointer ${
-                                                                                stay.mealPlan ? 'pl-2.5 pr-9' : 'pl-2.5 pr-8'
-                                                                            }`}
-                                                                        >
-                                                                            <option value="">Select meal plan</option>
-                                                                            <option value="EP (Room Only)">EP</option>
-                                                                            <option value="CP (Breakfast Only)">CP</option>
-                                                                            <option value="MAP (Half Board)">MAP</option>
-                                                                            <option value="AP (Full Board)">AP</option>
-                                                                        </select>
-                                                                        {!stay.mealPlan && (
-                                                                            <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                                                        )}
-                                                                        {stay.mealPlan && (
-                                                                            <DropdownChevron size={12} className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                                                        )}
-                                                                        {stay.mealPlan && (
-                                                                            <button
-                                                                                type="button"
-                                                                                onMouseDown={(e) => e.preventDefault()}
-                                                                                onClick={() => updateHotelStay(idx, { mealPlan: '' })}
-                                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-500 rounded-md hover:bg-red-50"
-                                                                                title="Clear meal plan"
-                                                                            >
-                                                                                <X size={14} />
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="relative">
-                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Room Type</p>
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Room Type / Category</p>
                                                                     <div className="relative">
                                                                         <input
                                                                             type="text"
@@ -4901,20 +5270,44 @@ const Quotations = () => {
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                <div>
-                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Rooms</p>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={1}
-                                                                        value={stay.rooms || 1}
-                                                                        onChange={(e) => updateHotelStay(idx, { rooms: Math.max(1, parseInt(e.target.value) || 1) })}
-                                                                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
-                                                                    />
+                                                                <div className="relative">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Meal Plan</p>
+                                                                    <div className="relative crm-select-wrap">
+                                                                        <select
+                                                                            value={stay.mealPlan || ''}
+                                                                            onChange={(e) => updateHotelStay(idx, { mealPlan: e.target.value })}
+                                                                            className={`w-full py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white appearance-none cursor-pointer ${
+                                                                                stay.mealPlan ? 'pl-2.5 pr-9' : 'pl-2.5 pr-8'
+                                                                            }`}
+                                                                        >
+                                                                            <option value="">Select meal plan</option>
+                                                                            <option value="EP (Room Only)">EP</option>
+                                                                            <option value="CP (Breakfast Only)">CP</option>
+                                                                            <option value="MAP (Half Board)">MAP</option>
+                                                                            <option value="AP (Full Board)">AP</option>
+                                                                        </select>
+                                                                        {!stay.mealPlan && (
+                                                                            <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                                        )}
+                                                                        {stay.mealPlan && (
+                                                                            <DropdownChevron size={12} className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                                        )}
+                                                                        {stay.mealPlan && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onMouseDown={(e) => e.preventDefault()}
+                                                                                onClick={() => updateHotelStay(idx, { mealPlan: '' })}
+                                                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-red-500 rounded-md hover:bg-red-50"
+                                                                                title="Clear meal plan"
+                                                                            >
+                                                                                <X size={14} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Pax/Room</p>
-                                                                    <input
-                                                                        type="number"
+                                                                    <NumberInput
                                                                         min={1}
                                                                         value={stay.personsPerRoom || 2}
                                                                         onChange={(e) => updateHotelStay(idx, { personsPerRoom: Math.max(1, parseInt(e.target.value) || 1) })}
@@ -4922,27 +5315,127 @@ const Quotations = () => {
                                                                     />
                                                                 </div>
                                                                 <div>
-                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Extra Beds</p>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={0}
-                                                                        value={stay.extraBed || 0}
-                                                                        onChange={(e) => updateHotelStay(idx, { extraBed: Math.max(0, parseInt(e.target.value) || 0) })}
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Number of Rooms</p>
+                                                                    <NumberInput
+                                                                        min={1}
+                                                                        value={stay.rooms || 1}
+                                                                        onChange={(e) => updateHotelStay(idx, { rooms: Math.max(1, parseInt(e.target.value) || 1) })}
                                                                         className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
                                                                     />
                                                                 </div>
                                                                 <div>
-                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Bed Price ({currencySymbol}/night)</p>
-                                                                    <input
-                                                                        type="number"
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Extra Beds</p>
+                                                                    <NumberInput
+                                                                        min={0}
+                                                                        value={stay.extraBed || 0}
+                                                                        onChange={(e) => {
+                                                                            const beds = Math.max(0, parseInt(e.target.value) || 0);
+                                                                            updateHotelStay(idx, {
+                                                                                extraBed: beds,
+                                                                                ...(beds === 0 ? { extraBedPrice: 0 } : {}),
+                                                                            });
+                                                                        }}
+                                                                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <p className={`text-[10px] font-black uppercase mb-1 ${hotelValidationAttempted && stayMissingExtraBedPrice(stay) ? 'text-rose-600' : 'text-slate-500'}`}>
+                                                                        Extra Bed Price ({currencySymbol}/night)
+                                                                    </p>
+                                                                    <NumberInput
                                                                         min={0}
                                                                         value={formatInputValue(stay.extraBedPrice || 0)}
                                                                         placeholder="0"
                                                                         step={priceInputStep}
                                                                         disabled={(stay.extraBed || 0) === 0}
                                                                         onChange={(e) => updateHotelStay(idx, { extraBedPrice: parseInputValue(e.target.value) })}
-                                                                        className="crm-price-field px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                                                                        className={`crm-price-field px-2 py-2 border rounded-lg text-xs font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400 ${
+                                                                            hotelValidationAttempted && stayMissingExtraBedPrice(stay)
+                                                                                ? 'border-rose-400 ring-1 ring-rose-200'
+                                                                                : 'border-slate-200'
+                                                                        }`}
                                                                     />
+                                                                    {hotelValidationAttempted && stayMissingExtraBedPrice(stay) && (
+                                                                        <p className="mt-1 text-[10px] font-semibold text-rose-600">
+                                                                            Extra bed price is required
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Child with Bed</p>
+                                                                    <NumberInput
+                                                                        min={0}
+                                                                        value={stay.childWithBed || 0}
+                                                                        onChange={(e) => {
+                                                                            const count = Math.max(0, parseInt(e.target.value) || 0);
+                                                                            updateHotelStay(idx, {
+                                                                                childWithBed: count,
+                                                                                ...(count === 0 ? { childWithBedPrice: 0 } : {}),
+                                                                            });
+                                                                        }}
+                                                                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <p className={`text-[10px] font-black uppercase mb-1 ${childWithBedPriceInvalid ? 'text-rose-600' : 'text-slate-500'}`}>
+                                                                        Child with Bed Price ({currencySymbol}/night)
+                                                                    </p>
+                                                                    <NumberInput
+                                                                        min={0}
+                                                                        value={formatInputValue(stay.childWithBedPrice || 0)}
+                                                                        placeholder="0"
+                                                                        step={priceInputStep}
+                                                                        disabled={(stay.childWithBed || 0) === 0}
+                                                                        onChange={(e) => updateHotelStay(idx, { childWithBedPrice: parseInputValue(e.target.value) })}
+                                                                        className={`crm-price-field px-2 py-2 border rounded-lg text-xs font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400 ${
+                                                                            childWithBedPriceInvalid
+                                                                                ? 'border-rose-400 ring-1 ring-rose-200'
+                                                                                : 'border-slate-200'
+                                                                        }`}
+                                                                    />
+                                                                    {childWithBedPriceInvalid && (
+                                                                        <p className="mt-1 text-[10px] font-semibold text-rose-600">
+                                                                            Child with bed price is required
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Child without Bed</p>
+                                                                    <NumberInput
+                                                                        min={0}
+                                                                        value={stay.childWithoutBed || 0}
+                                                                        onChange={(e) => {
+                                                                            const count = Math.max(0, parseInt(e.target.value) || 0);
+                                                                            updateHotelStay(idx, {
+                                                                                childWithoutBed: count,
+                                                                                ...(count === 0 ? { childWithoutBedPrice: 0 } : {}),
+                                                                            });
+                                                                        }}
+                                                                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <p className={`text-[10px] font-black uppercase mb-1 ${childWithoutBedPriceInvalid ? 'text-rose-600' : 'text-slate-500'}`}>
+                                                                        Child without Bed Price ({currencySymbol}/night)
+                                                                    </p>
+                                                                    <NumberInput
+                                                                        min={0}
+                                                                        value={formatInputValue(stay.childWithoutBedPrice || 0)}
+                                                                        placeholder="0"
+                                                                        step={priceInputStep}
+                                                                        disabled={(stay.childWithoutBed || 0) === 0}
+                                                                        onChange={(e) => updateHotelStay(idx, { childWithoutBedPrice: parseInputValue(e.target.value) })}
+                                                                        className={`crm-price-field px-2 py-2 border rounded-lg text-xs font-bold bg-white disabled:bg-slate-50 disabled:text-slate-400 ${
+                                                                            childWithoutBedPriceInvalid
+                                                                                ? 'border-rose-400 ring-1 ring-rose-200'
+                                                                                : 'border-slate-200'
+                                                                        }`}
+                                                                    />
+                                                                    {childWithoutBedPriceInvalid && (
+                                                                        <p className="mt-1 text-[10px] font-semibold text-rose-600">
+                                                                            Child without bed price is required
+                                                                        </p>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -4967,19 +5460,13 @@ const Quotations = () => {
                                                                             </div>
                                                                             <div className="crm-price-field-wrap">
                                                                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">{currencySymbol}</span>
-                                                                                <input
-                                                                                    type="number"
+                                                                                <NumberInput
                                                                                     min={0}
                                                                                     step={priceInputStep}
                                                                                     value={formatInputValue(row.given || 0)}
                                                                                     onChange={(e) => updateStayNightGiven(idx, row.nightIdx, parseInputValue(e.target.value))}
-                                                                                    className={`crm-price-field pl-6 pr-2 py-1.5 border rounded-lg text-xs font-bold bg-white focus:outline-none focus:ring-1 focus:ring-crm-400 ${
-                                                                                        row.rate <= 0 ? 'border-amber-300' : 'border-slate-200'
-                                                                                    }`}
+                                                                                    className="crm-price-field pl-6 pr-2 py-1.5 border border-slate-200 rounded-lg text-xs font-bold bg-white focus:outline-none focus:border-slate-300"
                                                                                 />
-                                                                                {row.rate <= 0 && (
-                                                                                    <AlertCircle size={12} className="absolute -left-4 top-1/2 -translate-y-1/2 text-amber-500" />
-                                                                                )}
                                                                             </div>
                                                                         </div>
                                                                         <HotelSpecialInclusionsSection
@@ -5012,6 +5499,38 @@ const Quotations = () => {
                                                                     </p>
                                                                 </div>
                                                             )}
+                                                            {(stay.childWithBed || 0) > 0 && (
+                                                                <div className="pt-3 mt-2 border-t border-slate-200 space-y-1.5">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Child with bed</p>
+                                                                    <div className="grid grid-cols-[1fr_auto] gap-x-2 items-center text-xs">
+                                                                        <span className="text-slate-600 font-semibold">
+                                                                            {stay.childWithBed} × {stay.nights} night{stay.nights > 1 ? 's' : ''}
+                                                                        </span>
+                                                                        <span className="text-right font-bold text-crm-700 crm-price-amount">
+                                                                            {childWithBedTotal > 0 ? formatInr(childWithBedTotal) : '—'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[10px] text-slate-400">
+                                                                        {formatInr(stay.childWithBedPrice || 0)} per child per night
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {(stay.childWithoutBed || 0) > 0 && (
+                                                                <div className="pt-3 mt-2 border-t border-slate-200 space-y-1.5">
+                                                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Child without bed</p>
+                                                                    <div className="grid grid-cols-[1fr_auto] gap-x-2 items-center text-xs">
+                                                                        <span className="text-slate-600 font-semibold">
+                                                                            {stay.childWithoutBed} × {stay.nights} night{stay.nights > 1 ? 's' : ''}
+                                                                        </span>
+                                                                        <span className="text-right font-bold text-crm-700 crm-price-amount">
+                                                                            {childWithoutBedTotal > 0 ? formatInr(childWithoutBedTotal) : '—'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-[10px] text-slate-400">
+                                                                        {formatInr(stay.childWithoutBedPrice || 0)} per child per night
+                                                                    </p>
+                                                                </div>
+                                                            )}
                                                             {inclusionsTotal > 0 && (
                                                                 <div className="pt-3 mt-2 border-t border-slate-200 space-y-1.5">
                                                                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Special services</p>
@@ -5031,7 +5550,7 @@ const Quotations = () => {
                                                             )}
                                                             {stayHotelTotal > 0 && (
                                                                 <div className="grid grid-cols-[1fr_auto] gap-x-2 pt-2 mt-1 text-xs font-black">
-                                                                    <span className="text-slate-600 uppercase tracking-wider">Stay total</span>
+                                                                    <span className="text-slate-600 uppercase tracking-wider">Sub total</span>
                                                                     <span className="text-right text-crm-800 crm-price-amount">{formatInr(stayHotelTotal)}</span>
                                                                 </div>
                                                             )}
@@ -5077,6 +5596,8 @@ const Quotations = () => {
                                                                         {' '}
                                                                         (rooms {formatInr(stayGivenTotal)}
                                                                         {extraBedTotal > 0 && ` + extra bed ${formatInr(extraBedTotal)}`}
+                                                                        {childWithBedTotal > 0 && ` + child with bed ${formatInr(childWithBedTotal)}`}
+                                                                        {childWithoutBedTotal > 0 && ` + child without bed ${formatInr(childWithoutBedTotal)}`}
                                                                         {inclusionsTotal > 0 && ` + services ${formatInr(inclusionsTotal)}`}
                                                                         )
                                                                     </span>
@@ -5092,6 +5613,16 @@ const Quotations = () => {
                                                     No split configured. You can add multiple hotels by nights.
                                                 </div>
                                             )}
+                                            {formHotelStays.length > 0 && hotelsStayGrandTotal > 0 && (
+                                                <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-crm-200 bg-crm-50/60">
+                                                    <span className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                                                        Stay total
+                                                    </span>
+                                                    <span className="text-sm font-black text-crm-800 crm-price-amount">
+                                                        {formatInr(hotelsStayGrandTotal)}
+                                                    </span>
+                                                </div>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -5102,11 +5633,16 @@ const Quotations = () => {
                                                             hotelId: '',
                                                             nights: 1,
                                                             hotelInput: '',
+                                                            city: builderCity || '',
                                                             roomType: '',
                                                             rooms: 1,
                                                             personsPerRoom: 2,
                                                             extraBed: 0,
                                                             extraBedPrice: 0,
+                                                            childWithBed: 0,
+                                                            childWithBedPrice: 0,
+                                                            childWithoutBed: 0,
+                                                            childWithoutBedPrice: 0,
                                                             mealPlan: ''
                                                         }
                                                     ]);
@@ -5134,14 +5670,179 @@ const Quotations = () => {
                             )}
 
                             {builderStep === 'itinerary' && (
-                            <div className="lg:grid lg:grid-cols-[280px_1fr] gap-8 border-t border-slate-100 pt-8">
-                                {/* Activity Vault Sidebar */}
-                                <div className="space-y-4">
+                            <div className="space-y-6 border-t border-slate-100 pt-8">
+                                <div className="p-4 bg-white border border-slate-200 rounded-2xl">
+                                    <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
+                                        <div className="flex-1 min-w-0">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5 block">
+                                                Travel vehicle for activities
+                                            </label>
+                                            <div className="relative crm-select-wrap">
+                                                <select
+                                                    value={formVehicleType}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value;
+                                                        setFormVehicleType(next);
+                                                        if (next !== 'Car') setFormCarType('');
+                                                        if (next !== 'Other') setFormVehicleOther('');
+                                                    }}
+                                                    className={`w-full py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white appearance-none cursor-pointer outline-none focus:border-crm-500 ${
+                                                        formVehicleType ? 'pl-3 pr-9' : 'pl-3 pr-8'
+                                                    }`}
+                                                >
+                                                    <option value="">Select vehicle</option>
+                                                    {ITINERARY_VEHICLE_TYPES.map((type) => (
+                                                        <option key={type} value={type}>
+                                                            {type}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <DropdownChevron
+                                                    size={14}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                                />
+                                            </div>
+                                            <p className="mt-1.5 text-[10px] text-slate-400">
+                                                Ground transport only (no flights or trains). Applies to activity travel for this itinerary.
+                                            </p>
+                                            {itineraryVehicleLabel && (
+                                                <p className="mt-1 text-[11px] font-semibold text-crm-700">
+                                                    Selected: {itineraryVehicleLabel}
+                                                    {formVehiclePrice > 0 ? ` · ${formatMoney(formVehiclePrice)}` : ''}
+                                                </p>
+                                            )}
+                                        </div>
+                                        {formVehicleType === 'Car' && (
+                                            <div className="flex-1 min-w-0 space-y-2.5">
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5 block">
+                                                        Car type
+                                                    </label>
+                                                    <div className="relative crm-select-wrap">
+                                                        <select
+                                                            value={formCarType}
+                                                            onChange={(e) => setFormCarType(e.target.value)}
+                                                            className={`w-full py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white appearance-none cursor-pointer outline-none focus:border-crm-500 ${
+                                                                formCarType ? 'pl-3 pr-9' : 'pl-3 pr-8'
+                                                            }`}
+                                                        >
+                                                            <option value="">Select car type</option>
+                                                            {ITINERARY_CAR_TYPES.map((type) => (
+                                                                <option key={type} value={type}>
+                                                                    {type}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <DropdownChevron
+                                                            size={14}
+                                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 whitespace-nowrap">
+                                                        Vehicle price
+                                                    </label>
+                                                    <div className="relative crm-price-field-wrap flex-1 min-w-0">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                                                            {currencySymbol}
+                                                        </span>
+                                                        <NumberInput
+                                                            min={0}
+                                                            step={priceInputStep}
+                                                            value={
+                                                                formVehiclePrice > 0
+                                                                    ? formatInputValue(formVehiclePrice)
+                                                                    : '0'
+                                                            }
+                                                            onChange={(e) =>
+                                                                setFormVehiclePrice(parseInputValue(e.target.value))
+                                                            }
+                                                            className="crm-price-field w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white outline-none focus:border-crm-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {formVehicleType === 'Other' && (
+                                            <div className="flex-1 min-w-0 space-y-2.5">
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5 block">
+                                                        Specify vehicle
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        value={formVehicleOther}
+                                                        onChange={(e) => setFormVehicleOther(e.target.value)}
+                                                        placeholder="e.g. Jeep, Cable car, Tuk-tuk"
+                                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white outline-none focus:border-crm-500"
+                                                    />
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 whitespace-nowrap">
+                                                        Vehicle price
+                                                    </label>
+                                                    <div className="relative crm-price-field-wrap flex-1 min-w-0">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                                                            {currencySymbol}
+                                                        </span>
+                                                        <NumberInput
+                                                            min={0}
+                                                            step={priceInputStep}
+                                                            value={
+                                                                formVehiclePrice > 0
+                                                                    ? formatInputValue(formVehiclePrice)
+                                                                    : '0'
+                                                            }
+                                                            onChange={(e) =>
+                                                                setFormVehiclePrice(parseInputValue(e.target.value))
+                                                            }
+                                                            className="crm-price-field w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white outline-none focus:border-crm-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {formVehicleType &&
+                                            formVehicleType !== 'Car' &&
+                                            formVehicleType !== 'Other' && (
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 sm:mt-[22px]">
+                                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 whitespace-nowrap">
+                                                        Vehicle price
+                                                    </label>
+                                                    <div className="relative crm-price-field-wrap flex-1 min-w-0">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                                                            {currencySymbol}
+                                                        </span>
+                                                        <NumberInput
+                                                            min={0}
+                                                            step={priceInputStep}
+                                                            value={
+                                                                formVehiclePrice > 0
+                                                                    ? formatInputValue(formVehiclePrice)
+                                                                    : '0'
+                                                            }
+                                                            onChange={(e) =>
+                                                                setFormVehiclePrice(parseInputValue(e.target.value))
+                                                            }
+                                                            className="crm-price-field w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-white outline-none focus:border-crm-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                            <div className="lg:grid lg:grid-cols-[280px_1fr] gap-8">
+                                {/* Activity Vault Sidebar — desktop only (drag & drop) */}
+                                <div className="hidden lg:block space-y-4">
                                     <div className="sticky top-4">
                                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-3">
                                             <Calculator size={14} /> Activity Vault
                                         </h3>
-                                        <div className="relative mb-4">
+                                        <div className="relative mb-3">
                                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                                             <input
                                                 type="text"
@@ -5152,19 +5853,113 @@ const Quotations = () => {
                                             />
                                         </div>
 
+                                        {!showNewActivityForm ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setShowNewActivityForm(true);
+                                                    setNewActivityError('');
+                                                }}
+                                                className="w-full mb-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-bold text-crm-700 bg-crm-50 border border-dashed border-crm-200 rounded-xl hover:bg-crm-100 transition-colors"
+                                            >
+                                                <Plus size={13} /> Add new activity
+                                            </button>
+                                        ) : (
+                                            <div className="mb-3 p-3 space-y-2.5 bg-white border border-crm-200 rounded-xl shadow-sm">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-[10px] font-black uppercase tracking-wider text-crm-700">New activity</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowNewActivityForm(false);
+                                                            resetNewActivityForm();
+                                                        }}
+                                                        className="p-1 text-slate-400 hover:text-slate-600 rounded-md"
+                                                        title="Close"
+                                                    >
+                                                        <X size={14} />
+                                                    </button>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Destination country</label>
+                                                    <div className="mt-1 px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-bold text-slate-700">
+                                                        {builderCountry || 'Not selected'}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Title *</label>
+                                                    <input
+                                                        type="text"
+                                                        value={newActivityTitle}
+                                                        onChange={(e) => setNewActivityTitle(e.target.value)}
+                                                        placeholder="Activity name"
+                                                        className="mt-1 w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-crm-500"
+                                                    />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Price *</label>
+                                                        <NumberInput
+                                                            min={0}
+                                                            step={priceInputStep}
+                                                            value={formatInputValue(newActivityPrice || 0)}
+                                                            onChange={(e) => setNewActivityPrice(parseInputValue(e.target.value))}
+                                                            className="mt-1 w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-crm-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Category *</label>
+                                                        <div className="relative crm-select-wrap mt-1">
+                                                            <select
+                                                                value={newActivityCategory}
+                                                                onChange={(e) => setNewActivityCategory(e.target.value)}
+                                                                className="w-full px-2.5 py-2 pr-8 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-crm-500 appearance-none cursor-pointer bg-white"
+                                                            >
+                                                                <option>Nature</option>
+                                                                <option>Adventure</option>
+                                                                <option>Culture</option>
+                                                                <option>Leisure</option>
+                                                                <option>Dining</option>
+                                                                <option>Modern</option>
+                                                            </select>
+                                                            <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Description *</label>
+                                                    <textarea
+                                                        value={newActivityDescription}
+                                                        onChange={(e) => setNewActivityDescription(e.target.value)}
+                                                        rows={2}
+                                                        placeholder="Short description"
+                                                        className="mt-1 w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:border-crm-500 resize-none"
+                                                    />
+                                                </div>
+                                                {newActivityError && (
+                                                    <p className="text-[10px] font-semibold text-rose-600">{newActivityError}</p>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const created = createActivityFromForm();
+                                                        if (created) {
+                                                            setDraggedActivity(created);
+                                                            setActivitySearch(created.title || '');
+                                                        }
+                                                    }}
+                                                    className="w-full px-3 py-2 text-[11px] font-black uppercase tracking-wide text-white bg-crm-600 hover:bg-crm-700 rounded-lg"
+                                                >
+                                                    Save activity
+                                                </button>
+                                            </div>
+                                        )}
+
                                         <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar pb-10">
-                                            {allActivities
-                                                .filter(act => {
-                                                    const countryStr = act.country || 'Global';
-                                                    const countryMatch =
-                                                        !builderCountry ||
-                                                        countryStr === 'Global' ||
-                                                        matchesBuilderCountry(countryStr);
-                                                    const searchMatch = (act.title || '').toLowerCase().includes(activitySearch.toLowerCase()) || (act.category || '').toLowerCase().includes(activitySearch.toLowerCase());
-                                                    return countryMatch && searchMatch;
-                                                })
-                                                .map(act => {
-                                                    const isAssigned = assignedActivityKeys.has(getActivityAssignmentKey(act));
+                                            {filteredVaultActivities.map(act => {
+                                                    const isAssigned =
+                                                        !isFreeDayActivity(act) &&
+                                                        assignedActivityKeys.has(getActivityAssignmentKey(act));
                                                     return (
                                                     <div
                                                         key={act.id}
@@ -5182,6 +5977,8 @@ const Quotations = () => {
                                                             <span className="text-[11px] font-bold text-slate-800 line-clamp-1">{act.title}</span>
                                                             {isAssigned ? (
                                                                 <span className="text-[9px] font-black uppercase text-slate-400 shrink-0 ml-1">Assigned</span>
+                                                            ) : isFreeDayActivity(act) ? (
+                                                                <span className="text-[9px] font-black uppercase text-emerald-600 shrink-0 ml-1">Reusable</span>
                                                             ) : (
                                                                 <GripVertical size={12} className="text-slate-300 group-hover:text-crm-400" />
                                                             )}
@@ -5204,15 +6001,13 @@ const Quotations = () => {
                                                     <button
                                                         type="button"
                                                         onClick={() => {
-                                                            const created = createActivityByName(activitySearch);
-                                                            if (created) {
-                                                                setDraggedActivity(created);
-                                                                setActivitySearch(created.title);
-                                                            }
+                                                            setShowNewActivityForm(true);
+                                                            setNewActivityTitle(activitySearch.trim());
+                                                            setNewActivityError('');
                                                         }}
                                                         className="w-full text-left px-3 py-2.5 text-sm font-bold text-crm-600 hover:bg-crm-50 border border-dashed border-crm-200 rounded-xl"
                                                     >
-                                                        + Add &quot;{activitySearch.trim()}&quot; to vault
+                                                        + Add &quot;{activitySearch.trim()}&quot; as new activity
                                                     </button>
                                                 )}
                                         </div>
@@ -5221,18 +6016,14 @@ const Quotations = () => {
 
                                 {/* Main Itinerary Builder Area */}
                                 <div className="space-y-6">
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex items-center justify-between gap-3">
                                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                                             <MapPin size={18} className="text-crm-600" /> Itinerary Design
                                         </h3>
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormItinerary([...formItinerary, { id: Date.now(), title: `Day ${formItinerary.length + 1}: Sightseeing`, activities: [] }])}
-                                            className="px-3 py-1.5 bg-white border border-crm-200 text-crm-600 text-[11px] font-bold rounded-lg hover:bg-crm-50 transition-all flex items-center gap-1.5"
-                                        >
-                                            <Plus size={14} /> Add Extra Day
-                                        </button>
                                     </div>
+                                    <p className="text-[11px] text-slate-500 lg:hidden -mt-3">
+                                        Tap <span className="font-bold text-crm-600">+</span> on a day to add activities from the list.
+                                    </p>
 
                                     <div className="space-y-4">
                                         {formItinerary.map((day, idx) => (
@@ -5242,25 +6033,17 @@ const Quotations = () => {
                                                 onDrop={(e) => {
                                                     e.preventDefault();
                                                     if (!draggedActivity) return;
-                                                    const draggedKey = getActivityAssignmentKey(draggedActivity);
-                                                    const alreadyAssigned = formItinerary.some((day) =>
-                                                        (day.activities || []).some(
-                                                            (act: any) => getActivityAssignmentKey(act) === draggedKey
-                                                        )
-                                                    );
-                                                    if (alreadyAssigned) {
-                                                        setDraggedActivity(null);
-                                                        return;
-                                                    }
-                                                    const newIt = [...formItinerary];
-                                                    newIt[idx].activities.push({ ...draggedActivity, customPrice: draggedActivity.price });
-                                                    setFormItinerary(newIt);
+                                                    addActivityToItineraryDay(idx, draggedActivity);
                                                     setDraggedActivity(null);
                                                 }}
-                                                className="p-4 rounded-2xl border-2 border-dashed border-slate-200 hover:border-crm-300 bg-white transition-all group"
+                                                className={`p-4 rounded-2xl border-2 border-dashed bg-white transition-all group ${
+                                                    itineraryValidationAttempted && !(day.activities || []).length
+                                                        ? 'border-rose-300 hover:border-rose-400 ring-1 ring-rose-100'
+                                                        : 'border-slate-200 hover:border-crm-300'
+                                                }`}
                                             >
                                                 <div className="flex items-center gap-3 mb-4">
-                                                    <div className="w-8 h-8 rounded-full bg-crm-600 text-white flex items-center justify-center font-bold text-xs ring-4 ring-crm-50">
+                                                    <div className="w-8 h-8 rounded-full bg-crm-600 text-white flex items-center justify-center font-bold text-xs ring-4 ring-crm-50 shrink-0">
                                                         {idx + 1}
                                                     </div>
                                                     <div className="flex flex-col gap-0.5">
@@ -5313,8 +6096,20 @@ const Quotations = () => {
                                                             newIt[idx].title = e.target.value;
                                                             setFormItinerary(newIt);
                                                         }}
-                                                        className="flex-1 font-bold text-slate-800 border-none focus:ring-0 p-0 text-sm bg-transparent"
+                                                        className="flex-1 min-w-0 font-bold text-slate-800 border-none focus:ring-0 p-0 text-sm bg-transparent"
                                                     />
+                                                    {/* Tablet: add activity via popup */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setActivityPickerDayIndex(idx);
+                                                            setActivityPickerSearch('');
+                                                        }}
+                                                        className="lg:hidden p-2 rounded-xl bg-crm-50 text-crm-600 border border-crm-200 hover:bg-crm-100 transition-all shrink-0"
+                                                        title="Add activity"
+                                                    >
+                                                        <Plus size={16} />
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -5322,21 +6117,19 @@ const Quotations = () => {
                                                                 setFormItinerary(formItinerary.filter(d => d.id !== day.id));
                                                             }
                                                         }}
-                                                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all shrink-0"
                                                     >
                                                         <Trash2 size={14} />
                                                     </button>
                                                 </div>
 
-                                                <div className="space-y-2 pl-11 min-h-[40px]">
+                                                <div className="space-y-2 pl-0 sm:pl-11 min-h-[40px]">
                                                     {day.activities.map((act: any, aIdx: number) => (
                                                         <div key={aIdx} className="flex gap-3 items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100 group/item">
                                                             <div className="w-1.5 h-1.5 rounded-full bg-crm-500" />
-                                                            <div className="flex-1">
-                                                                <div className="flex justify-between items-start">
-                                                                    {(act.allowTitleEdit === true ||
-                                                                        String(act.title || '').toLowerCase().includes('free day') ||
-                                                                        String(act.title || '').toLowerCase().includes('exploring on your own')) ? (
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex justify-between items-start gap-2">
+                                                                    {(act.allowTitleEdit === true || isFreeDayActivity(act)) ? (
                                                                         <input
                                                                             type="text"
                                                                             value={act.title || ''}
@@ -5351,12 +6144,11 @@ const Quotations = () => {
                                                                     ) : (
                                                                         <span className="text-[11px] font-bold text-slate-700 w-full mr-2">{act.title}</span>
                                                                     )}
-                                                                    <div className="flex items-center gap-1">
+                                                                    <div className="flex items-center gap-1 shrink-0">
                                                                         <span className="text-[10px] text-slate-400 font-bold uppercase mr-1">Cost:</span>
                                                                         <div className="relative crm-price-field-wrap">
                                                                             <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">{currencySymbol}</span>
-                                                                            <input
-                                                                                type="number"
+                                                                            <NumberInput
                                                                                 min={0}
                                                                                 step={priceInputStep}
                                                                                 value={formatInputValue(act.customPrice || 0)}
@@ -5375,11 +6167,11 @@ const Quotations = () => {
                                                                                 newIt[idx].activities.splice(aIdx, 1);
                                                                                 setFormItinerary(newIt);
                                                                             }}
-                                                                            className="p-1 text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover/item:opacity-100"
+                                                                            className="p-1 text-slate-300 hover:text-red-500 transition-all opacity-100 lg:opacity-0 lg:group-hover/item:opacity-100"
                                                                         >
                                                                             <Trash2 size={12} />
                                                                         </button>
-                                                                        <div className="flex flex-col gap-0.5 opacity-0 group-hover/item:opacity-100 transition-all ml-1 border-l border-slate-200 pl-1">
+                                                                        <div className="hidden sm:flex flex-col gap-0.5 opacity-0 group-hover/item:opacity-100 transition-all ml-1 border-l border-slate-200 pl-1">
                                                                             <button
                                                                                 type="button"
                                                                                 disabled={aIdx === 0}
@@ -5416,16 +6208,165 @@ const Quotations = () => {
                                                         </div>
                                                     ))}
                                                     {day.activities.length === 0 && (
-                                                        <div className="py-4 text-center text-[10px] text-slate-400 font-medium italic border border-dashed border-slate-100 rounded-xl">
-                                                            Drag an activity here from the vault
+                                                        <div className={`py-4 text-center text-[10px] font-medium italic border border-dashed rounded-xl ${
+                                                            itineraryValidationAttempted
+                                                                ? 'text-rose-600 border-rose-200 bg-rose-50/50'
+                                                                : 'text-slate-400 border-slate-100'
+                                                        }`}>
+                                                            {itineraryValidationAttempted
+                                                                ? 'Add at least one activity to this day'
+                                                                : (
+                                                                    <>
+                                                                        <span className="hidden lg:inline">Drag an activity here from the vault</span>
+                                                                        <span className="lg:hidden">Tap + to add an activity</span>
+                                                                    </>
+                                                                )}
                                                         </div>
                                                     )}
                                                 </div>
                                             </div>
                                         ))}
+                                        <div className="flex flex-col items-end gap-2 pt-3 mt-1 border-t border-slate-200">
+                                            {itineraryValidationAttempted && !isItineraryActivitiesComplete && (
+                                                <p className="text-[11px] font-semibold text-rose-600 w-full text-right">
+                                                    Every day needs at least one activity before continuing.
+                                                </p>
+                                            )}
+                                            <div className="w-full sm:w-auto sm:min-w-[16rem] space-y-1.5 text-right">
+                                                <div className="flex items-baseline justify-between gap-6 text-[11px] font-semibold text-slate-500">
+                                                    <span className="uppercase tracking-wider">Activity Cost Total</span>
+                                                    <span className="tabular-nums text-slate-700 crm-price-amount">
+                                                        {formatMoney(itineraryActivitiesTotal)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-baseline justify-between gap-6 text-[11px] font-semibold text-slate-500">
+                                                    <span className="uppercase tracking-wider">Vehicle</span>
+                                                    <span className="tabular-nums text-slate-700 crm-price-amount">
+                                                        {formatMoney(itineraryVehicleCost)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-baseline justify-between gap-6 pt-2 border-t border-slate-200 text-xs font-black text-slate-700">
+                                                    <span className="uppercase tracking-wider">Total</span>
+                                                    <span className="text-base text-crm-800 tabular-nums crm-price-amount">
+                                                        {formatMoney(itineraryGrandTotal)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                            </div>
+                            )}
+
+                            {/* Tablet activity picker popup */}
+                            {activityPickerDayIndex !== null && (
+                                <div className="fixed inset-0 z-[9990] flex items-end sm:items-center justify-center lg:hidden">
+                                    <div
+                                        className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+                                        onClick={() => setActivityPickerDayIndex(null)}
+                                    />
+                                    <div className="relative w-full sm:max-w-md max-h-[85vh] bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+                                        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+                                            <div className="min-w-0">
+                                                <h3 className="text-base font-black text-slate-900 tracking-tight">
+                                                    Add Activity
+                                                </h3>
+                                                <p className="text-[11px] text-slate-500 font-medium truncate">
+                                                    {formItinerary[activityPickerDayIndex]?.title || `Day ${activityPickerDayIndex + 1}`}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setActivityPickerDayIndex(null)}
+                                                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                            >
+                                                <X size={18} />
+                                            </button>
+                                        </div>
+                                        <div className="px-4 py-3 border-b border-slate-50 shrink-0">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                                <input
+                                                    type="text"
+                                                    value={activityPickerSearch}
+                                                    onChange={(e) => setActivityPickerSearch(e.target.value)}
+                                                    placeholder="Search activities..."
+                                                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-crm-500"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                                            {filteredPickerActivities.map((act) => {
+                                                const isAssigned =
+                                                    !isFreeDayActivity(act) &&
+                                                    assignedActivityKeys.has(getActivityAssignmentKey(act));
+                                                return (
+                                                    <button
+                                                        key={act.id}
+                                                        type="button"
+                                                        disabled={isAssigned}
+                                                        onClick={() => {
+                                                            if (isAssigned) return;
+                                                            const added = addActivityToItineraryDay(activityPickerDayIndex, act);
+                                                            if (added) setActivityPickerDayIndex(null);
+                                                        }}
+                                                        className={`w-full text-left p-3 rounded-xl border transition-all ${
+                                                            isAssigned
+                                                                ? 'bg-slate-50 border-slate-100 opacity-55 cursor-not-allowed'
+                                                                : 'bg-white border-slate-200 hover:border-crm-300 hover:bg-crm-50/40 active:scale-[0.99]'
+                                                        }`}
+                                                    >
+                                                        <div className="flex justify-between items-start gap-2 mb-1">
+                                                            <span className="text-sm font-bold text-slate-800">{act.title}</span>
+                                                            {isAssigned ? (
+                                                                <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Assigned</span>
+                                                            ) : (
+                                                                <span className="text-xs font-bold text-crm-600 shrink-0">{formatMoney(act.price)}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-[10px] text-slate-400 uppercase font-medium">{act.category}</span>
+                                                            {isFreeDayActivity(act) && (
+                                                                <span className="text-[10px] font-bold text-emerald-600">Reusable</span>
+                                                            )}
+                                                            {isAssigned && (
+                                                                <span className="text-[10px] text-slate-400">Already in itinerary</span>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                            {filteredPickerActivities.length === 0 && (
+                                                <p className="py-8 text-center text-xs text-slate-400 font-medium">
+                                                    No activities match your search
+                                                </p>
+                                            )}
+                                            {activityPickerSearch.trim() &&
+                                                !allActivities.some(
+                                                    (a) =>
+                                                        String(a.title || '')
+                                                            .trim()
+                                                            .toLowerCase() ===
+                                                        activityPickerSearch.trim().toLowerCase()
+                                                ) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowNewActivityForm(true);
+                                                            setNewActivityTitle(activityPickerSearch.trim());
+                                                            setNewActivityError('');
+                                                            setActivityPickerDayIndex(null);
+                                                        }}
+                                                        className="w-full text-left px-3 py-3 text-sm font-bold text-crm-600 hover:bg-crm-50 border border-dashed border-crm-200 rounded-xl"
+                                                    >
+                                                        + Add &quot;{activityPickerSearch.trim()}&quot; as new activity
+                                                    </button>
+                                                )}
+                                        </div>
+                                    </div>
+                                </div>
                             )}
 
                             {builderStep === 'additional' && (
@@ -5504,8 +6445,7 @@ const Quotations = () => {
                                                             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400">
                                                                 {currencySymbol}
                                                             </span>
-                                                            <input
-                                                                type="number"
+                                                            <NumberInput
                                                                 min={0}
                                                                 step={priceInputStep}
                                                                 value={formatInputValue(row.rate || 0)}
@@ -5590,6 +6530,8 @@ const Quotations = () => {
                                     getStayDateLabel={getStayDateLabel}
                                     getHotelName={(id) => getHotelRecord(id)?.name || 'Hotel'}
                                     itinerary={formItinerary}
+                                    transportation={itineraryVehicleLabel}
+                                    vehiclePrice={formVehiclePrice}
                                     hotelMealPlan={formHotelMealPlan}
                                     needFlight={formNeedFlight}
                                     flightMeal={formFlightMeal}
@@ -5602,7 +6544,12 @@ const Quotations = () => {
                                     onChange={setFormAdditionalServiceCharge}
                                     servicesTotal={activeEstimate.breakdown.services}
                                     chargeAmount={activeEstimate.additionalServiceCharge}
-                                    gstAmount={activeEstimate.taxes}
+                                    packageBase={
+                                        activeEstimate.subtotal +
+                                        activeEstimate.additionalServiceCharge
+                                    }
+                                    gstOnPackageAmount={activeEstimate.gstOnPackage || 0}
+                                    gstOnAdditionalAmount={activeEstimate.gstOnAdditional || 0}
                                 />
 
                                 <QuoteTermsSelector
@@ -5674,12 +6621,22 @@ const Quotations = () => {
                                                       },
                                                   ]
                                                 : []),
-                                            ...(activeEstimate.taxes > 0
+                                            ...((activeEstimate.gstOnPackage || 0) > 0
                                                 ? [
                                                       {
-                                                          key: 'gst',
-                                                          label: 'GST',
-                                                          amount: activeEstimate.taxes,
+                                                          key: 'gst-package',
+                                                          label: 'GST on Package (5%)',
+                                                          amount: activeEstimate.gstOnPackage || 0,
+                                                          className: 'text-emerald-400',
+                                                      },
+                                                  ]
+                                                : []),
+                                            ...((activeEstimate.gstOnAdditional || 0) > 0
+                                                ? [
+                                                      {
+                                                          key: 'gst-additional',
+                                                          label: 'GST on Additional (18%)',
+                                                          amount: activeEstimate.gstOnAdditional || 0,
                                                           className: 'text-emerald-400',
                                                       },
                                                   ]
@@ -5778,12 +6735,18 @@ const Quotations = () => {
                         </button>
                     </div>
 
-                    {/* Scrollable Document Container */}
-                    <div className="quote-print-scroll w-full h-full overflow-y-auto flex flex-col items-center py-12 px-4 print:overflow-visible print:h-auto">
+                    {/* Scrollable Document Container — block layout so quote can grow past one page */}
+                    <div className="quote-print-scroll w-full h-full overflow-y-auto py-12 px-4 print:overflow-visible print:h-auto">
                         <div 
                             ref={quotePrintRef}
                             id="printable-quote" 
-                            className="quote-print-document bg-white w-[210mm] min-h-[297mm] p-16 shadow-[0_0_80px_rgba(0,0,0,0.5)] flex flex-col rounded-[40px] overflow-visible print:block print:overflow-visible print:rounded-none print:shadow-none print:w-full print:p-0 print:m-0 print:min-h-0 print:h-auto"
+                            className="quote-print-document block bg-white w-[210mm] max-w-full mx-auto p-16 shadow-[0_0_80px_rgba(0,0,0,0.5)] rounded-[40px] overflow-visible print:block print:overflow-visible print:rounded-none print:shadow-none print:w-full print:max-w-none print:p-0 print:m-0 print:min-h-0 print:h-auto"
+                            style={{
+                                minHeight: '297mm',
+                                height: 'fit-content',
+                                backgroundColor: '#ffffff',
+                                flexShrink: 0,
+                            }}
                         >
                             {/* Repeats on every printed page — same header format */}
                             <header className="quote-print-running-header hidden print:flex">
@@ -5825,7 +6788,7 @@ const Quotations = () => {
                                 <p className="quote-print-page-num font-bold uppercase tracking-wider" />
                             </footer>
 
-                            <div className="quote-print-body flex flex-col flex-1 print:flex-none print:h-auto w-full">
+                            <div className="quote-print-body block w-full h-auto">
                             {/* Letterhead — screen preview only; PDF uses running header on every page */}
                             <div className="print:hidden flex justify-between items-start mb-12 border-b-4 border-slate-900 pb-8">
                                 <div>
@@ -5850,91 +6813,543 @@ const Quotations = () => {
                                     <h2 className="text-5xl font-black text-slate-100 uppercase tracking-tighter mb-4 leading-none italic">ITINERARY</h2>
                                     <div className="space-y-1">
                                         <p className="text-base font-black text-slate-900 uppercase">{(editingQuote || selectedQuote)?.customer}</p>
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">DATE: {(editingQuote || selectedQuote)?.date}</p>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                            DATE:{' '}
+                                            {(() => {
+                                                const q = editingQuote || selectedQuote;
+                                                const created = q?.createdAt
+                                                    ? new Date(q.createdAt)
+                                                    : null;
+                                                if (created && !Number.isNaN(created.getTime())) {
+                                                    return created.toLocaleDateString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        year: 'numeric',
+                                                    });
+                                                }
+                                                return q?.date || '';
+                                            })()}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Trip Overview Cards */}
-                            <div className="print-break-avoid grid grid-cols-4 gap-4 mb-12 print:mb-8">
-                                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                            <div className="print-break-avoid grid grid-cols-4 gap-3 mb-8 print:mb-6 items-stretch">
+                                <div className="pdf-break-avoid bg-slate-50 px-3 py-3 rounded-2xl border border-slate-100 overflow-visible min-w-0">
                                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Destination</p>
-                                    <p className="text-xs font-black text-slate-900 truncate">{(editingQuote || selectedQuote)?.destination}</p>
+                                    <p className="text-[11px] font-black text-slate-900 leading-snug break-words whitespace-normal">
+                                        {(editingQuote || selectedQuote)?.destination}
+                                    </p>
                                 </div>
-                                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                                <div className="pdf-break-avoid bg-slate-50 px-3 py-3 rounded-2xl border border-slate-100 overflow-visible min-w-0">
                                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Duration</p>
-                                    <p className="text-xs font-black text-slate-900">{getDurationDaysLabel((editingQuote || selectedQuote)?.duration)}</p>
+                                    <p className="text-[11px] font-black text-slate-900 leading-snug break-words whitespace-normal">
+                                        {getDurationDaysLabel((editingQuote || selectedQuote)?.duration)}
+                                    </p>
                                 </div>
-                                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                                <div className="pdf-break-avoid bg-slate-50 px-3 py-3 rounded-2xl border border-slate-100 overflow-visible min-w-0">
                                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Travelers</p>
-                                    <p className="text-xs font-black text-slate-900">{(editingQuote || selectedQuote)?.travelers}</p>
+                                    <p className="text-[11px] font-black text-slate-900 leading-snug break-words whitespace-normal">
+                                        {(editingQuote || selectedQuote)?.travelers}
+                                    </p>
                                 </div>
-                                <div className="bg-slate-900 text-white p-4 rounded-3xl">
+                                <div className="pdf-break-avoid bg-slate-900 text-white px-3 py-3 rounded-2xl overflow-visible min-w-0">
                                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Quote</p>
-                                    <p className="text-xs font-black text-crm-400">{formatMoney(editingQuote ? editingQuote.total : getQuoteDisplayTotal(selectedQuote))}</p>
+                                    <p className="text-[11px] font-black text-crm-400 leading-snug break-words whitespace-normal">
+                                        {formatMoney(editingQuote ? editingQuote.total : getQuoteDisplayTotal(selectedQuote))}
+                                    </p>
                                 </div>
                             </div>
 
-                            {/* Detailed Itinerary */}
-                            <div className="flex-1 print:flex-none print:h-auto">
-                                {(editingQuote || selectedQuote)?.itinerary && (editingQuote || selectedQuote).itinerary.length > 0 && (
-                                    <div className="mb-12">
-                                        <h3 className="quote-print-section-title text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-8 border-b-2 border-slate-100 pb-2">Planned Experience</h3>
-                                        <div className="space-y-8">
-                                            {(editingQuote || selectedQuote).itinerary.map((day: any, idx: number) => {
-                                                const dayTitle = day.title || `Day ${idx + 1}`;
-                                                const titleParts = dayTitle.split(':');
-                                                const dayLabel = titleParts[0];
-                                                const dayTheme = titleParts.slice(1).join(':').trim() || 'Sightseeing';
-                                                const activities = Array.isArray(day.activities) ? day.activities : [];
-                                                return (
-                                                <div key={day.id || idx} className="print-break-avoid relative pl-8 border-l-2 border-slate-100 last:border-l-0">
-                                                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-900" />
-                                                    <div className="mb-4">
-                                                        <span className="text-[9px] font-black text-crm-600 uppercase tracking-widest">{dayLabel}</span>
-                                                        <h4 className="font-black text-slate-900 text-sm uppercase tracking-tight">{dayTheme}</h4>
-                                                    </div>
-                                                    {activities.length > 0 ? (
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            {activities.map((act: any, aIdx: number) => (
-                                                                <div key={aIdx} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                                                                    <p className="text-[10px] font-black text-slate-800 mb-1">{act.title || act.name || 'Activity'}</p>
-                                                                    {act.description && (
-                                                                        <p className="text-[9px] text-slate-500 font-medium leading-relaxed">{act.description}</p>
+                            {(() => {
+                                const printQuote = editingQuote || selectedQuote;
+                                if (!printQuote) return null;
+                                const printPricing = getQuotePricingDisplay(printQuote, db);
+                                const printStays = (printQuote.hotelStays || []).filter(
+                                    (s: any) => s?.hotelId || s?.hotelInput
+                                );
+                                const formatPrintStayDay = (d: Date) => {
+                                    const day = d.getDate();
+                                    const suffix =
+                                        day % 10 === 1 && day !== 11
+                                            ? 'st'
+                                            : day % 10 === 2 && day !== 12
+                                              ? 'nd'
+                                              : day % 10 === 3 && day !== 13
+                                                ? 'rd'
+                                                : 'th';
+                                    const month = d.toLocaleDateString('en-US', { month: 'short' });
+                                    return `${day}${suffix} ${month}`;
+                                };
+                                const getPrintStayDateLabel = (stayIdx: number) => {
+                                    if (!printQuote.departureDate) return '';
+                                    const allStays = printQuote.hotelStays || [];
+                                    const stay = allStays[stayIdx];
+                                    const nights = Math.max(1, Number(stay?.nights || 1));
+                                    const offset = allStays
+                                        .slice(0, stayIdx)
+                                        .reduce(
+                                            (sum: number, s: any) =>
+                                                sum + Math.max(1, Number(s?.nights || 1)),
+                                            0
+                                        );
+                                    const start = new Date(printQuote.departureDate);
+                                    if (Number.isNaN(start.getTime())) return '';
+                                    start.setDate(start.getDate() + offset);
+                                    const end = new Date(start);
+                                    end.setDate(end.getDate() + Math.max(0, nights - 1));
+                                    return nights === 1
+                                        ? formatPrintStayDay(start)
+                                        : `${formatPrintStayDay(start)} - ${formatPrintStayDay(end)}`;
+                                };
+                                const getPrintNightStart = (stayIdx: number) => {
+                                    if (!printQuote.departureDate) return null;
+                                    const allStays = printQuote.hotelStays || [];
+                                    const offset = allStays
+                                        .slice(0, stayIdx)
+                                        .reduce(
+                                            (sum: number, s: any) =>
+                                                sum + Math.max(1, Number(s?.nights || 1)),
+                                            0
+                                        );
+                                    const start = new Date(printQuote.departureDate);
+                                    if (Number.isNaN(start.getTime())) return null;
+                                    start.setDate(start.getDate() + offset);
+                                    return start;
+                                };
+
+                                return (
+                                    <div className="w-full h-auto">
+                                        {/* Hotel Selection */}
+                                        {printStays.length > 0 && (
+                                            <div className="mb-8">
+                                                <h3 className="quote-print-section-title text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-6 border-b-2 border-slate-100 pb-2">
+                                                    Hotel Stays
+                                                </h3>
+                                                <div className="space-y-4">
+                                                    {(printQuote.hotelStays || []).map(
+                                                        (stay: any, idx: number) => {
+                                                            if (!stay?.hotelId && !stay?.hotelInput) {
+                                                                return null;
+                                                            }
+                                                            const hotel = (
+                                                                db?.hotels?.data || []
+                                                            ).find(
+                                                                (h: any) => h.id === stay.hotelId
+                                                            );
+                                                            const hotelName =
+                                                                stay.hotelInput?.trim() ||
+                                                                hotel?.name ||
+                                                                'Hotel';
+                                                            const nights = Math.max(
+                                                                1,
+                                                                Number(stay.nights) || 1
+                                                            );
+                                                            const stayDates =
+                                                                getPrintStayDateLabel(idx);
+                                                            const nightStart =
+                                                                getPrintNightStart(idx);
+                                                            const stayTotal =
+                                                                sumStayHotelTotal(stay);
+                                                            const nightPrices = Array.isArray(
+                                                                stay.nightPrices
+                                                            )
+                                                                ? stay.nightPrices.slice(0, nights)
+                                                                : [];
+                                                            const inclusions = (
+                                                                stay.specialInclusions || []
+                                                            ).filter((s: any) => s?.name?.trim());
+                                                            return (
+                                                                <div
+                                                                    key={stay.hotelId || idx}
+                                                                    className="bg-slate-50 rounded-2xl border border-slate-100 p-5 overflow-visible"
+                                                                >
+                                                                    <div className="flex flex-wrap items-start justify-between gap-3 mb-4 pdf-break-avoid">
+                                                                        <div>
+                                                                            <p className="text-[9px] font-black text-crm-600 uppercase tracking-widest mb-1">
+                                                                                Stay {idx + 1}
+                                                                                {stayDates
+                                                                                    ? ` · ${stayDates}`
+                                                                                    : ''}
+                                                                            </p>
+                                                                            <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">
+                                                                                {hotelName}
+                                                                            </h4>
+                                                                            <p className="text-[10px] font-bold text-slate-500 mt-1">
+                                                                                {nights} night
+                                                                                {nights > 1
+                                                                                    ? 's'
+                                                                                    : ''}
+                                                                                {(stay.city ||
+                                                                                    hotel?.city) &&
+                                                                                    ` · ${stay.city || hotel?.city}`}
+                                                                            </p>
+                                                                        </div>
+                                                                        {stayTotal > 0 && (
+                                                                            <p className="text-sm font-black text-crm-600">
+                                                                                {formatMoney(
+                                                                                    stayTotal
+                                                                                )}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                                                                        <div>
+                                                                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                Room
+                                                                            </p>
+                                                                            <p className="text-[10px] font-black text-slate-800">
+                                                                                {stay.roomType ||
+                                                                                    'Standard'}
+                                                                            </p>
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                Meal plan
+                                                                            </p>
+                                                                            <p className="text-[10px] font-black text-slate-800">
+                                                                                {stay.mealPlan ||
+                                                                                    printQuote.hotelMealPlan ||
+                                                                                    '—'}
+                                                                            </p>
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                Rooms / Pax
+                                                                            </p>
+                                                                            <p className="text-[10px] font-black text-slate-800">
+                                                                                {stay.rooms || 1}{' '}
+                                                                                room ·{' '}
+                                                                                {stay.personsPerRoom ||
+                                                                                    2}{' '}
+                                                                                pax/room
+                                                                            </p>
+                                                                        </div>
+                                                                        {(stay.extraBed || 0) >
+                                                                            0 && (
+                                                                            <div>
+                                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                    Extra beds
+                                                                                </p>
+                                                                                <p className="text-[10px] font-black text-slate-800">
+                                                                                    {stay.extraBed}{' '}
+                                                                                    @{' '}
+                                                                                    {formatMoney(
+                                                                                        stay.extraBedPrice ||
+                                                                                            0
+                                                                                    )}
+                                                                                    /night
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+                                                                        {(stay.childWithBed || 0) >
+                                                                            0 && (
+                                                                            <div>
+                                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                    Child with bed
+                                                                                </p>
+                                                                                <p className="text-[10px] font-black text-slate-800">
+                                                                                    {
+                                                                                        stay.childWithBed
+                                                                                    }{' '}
+                                                                                    @{' '}
+                                                                                    {formatMoney(
+                                                                                        stay.childWithBedPrice ||
+                                                                                            0
+                                                                                    )}
+                                                                                    /night
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+                                                                        {(stay.childWithoutBed ||
+                                                                            0) > 0 && (
+                                                                            <div>
+                                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                                                    Child w/o bed
+                                                                                </p>
+                                                                                <p className="text-[10px] font-black text-slate-800">
+                                                                                    {
+                                                                                        stay.childWithoutBed
+                                                                                    }{' '}
+                                                                                    @{' '}
+                                                                                    {formatMoney(
+                                                                                        stay.childWithoutBedPrice ||
+                                                                                            0
+                                                                                    )}
+                                                                                    /night
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    {nightPrices.length > 0 && (
+                                                                        <div className="pt-3 border-t border-slate-200/80">
+                                                                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                                                                Night-wise stays
+                                                                            </p>
+                                                                            <div className="grid grid-cols-2 gap-2">
+                                                                                {nightPrices.map(
+                                                                                    (
+                                                                                        np: any,
+                                                                                        nIdx: number
+                                                                                    ) => {
+                                                                                        const nightDate =
+                                                                                            nightStart
+                                                                                                ? new Date(
+                                                                                                      nightStart
+                                                                                                  )
+                                                                                                : null;
+                                                                                        if (
+                                                                                            nightDate
+                                                                                        ) {
+                                                                                            nightDate.setDate(
+                                                                                                nightDate.getDate() +
+                                                                                                    nIdx
+                                                                                            );
+                                                                                        }
+                                                                                        const dateLabel =
+                                                                                            nightDate
+                                                                                                ? formatHotelNightDateLabel(
+                                                                                                      nightDate
+                                                                                                  )
+                                                                                                : null;
+                                                                                        const amount =
+                                                                                            Number.isFinite(
+                                                                                                Number(
+                                                                                                    np?.given
+                                                                                                )
+                                                                                            )
+                                                                                                ? Number(
+                                                                                                      np.given
+                                                                                                  )
+                                                                                                : Number(
+                                                                                                      np?.rate
+                                                                                                  ) ||
+                                                                                                  0;
+                                                                                        return (
+                                                                                            <div
+                                                                                                key={
+                                                                                                    nIdx
+                                                                                                }
+                                                                                                className="pdf-break-avoid flex items-center justify-between gap-2 bg-white rounded-xl border border-slate-100 px-3 py-2"
+                                                                                            >
+                                                                                                <span className="text-[9px] font-bold text-slate-700">
+                                                                                                    Night{' '}
+                                                                                                    {nIdx +
+                                                                                                        1}
+                                                                                                    {dateLabel
+                                                                                                        ? ` · ${dateLabel.datePart}`
+                                                                                                        : ''}
+                                                                                                </span>
+                                                                                                <span className="text-[9px] font-black text-crm-600">
+                                                                                                    {formatMoney(
+                                                                                                        amount
+                                                                                                    )}
+                                                                                                </span>
+                                                                                            </div>
+                                                                                        );
+                                                                                    }
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                    {inclusions.length > 0 && (
+                                                                        <ul className="mt-3 space-y-1">
+                                                                            {inclusions.map(
+                                                                                (s: any) => (
+                                                                                    <li
+                                                                                        key={
+                                                                                            s.id ||
+                                                                                            s.name
+                                                                                        }
+                                                                                        className="text-[9px] font-medium text-slate-600"
+                                                                                    >
+                                                                                        + {s.name}
+                                                                                        {s.amount !=
+                                                                                            null &&
+                                                                                        s.amount > 0
+                                                                                            ? ` (${formatMoney(s.amount)})`
+                                                                                            : ''}
+                                                                                    </li>
+                                                                                )
+                                                                            )}
+                                                                        </ul>
                                                                     )}
                                                                 </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest italic">Leisure / Free time</p>
+                                                            );
+                                                        }
                                                     )}
                                                 </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
+                                            </div>
+                                        )}
 
-                                {/* Pricing Breakdown - Visual Only for Document */}
-                                <div className="mt-12 pt-8 border-t-4 border-slate-900">
-                                    <div className="flex justify-between items-end">
-                                        <div>
-                                            <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-2">Inclusions</p>
-                                            <p className="text-[9px] text-slate-400 font-bold uppercase max-w-sm">
-                                                Premium Stay, Flights, Guided Tours, Private Transfers, and All Applicable Taxes.
-                                            </p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Net Package Value</p>
-                                            <h4 className="text-4xl font-black text-crm-600 tracking-tighter">{formatMoney(editingQuote ? editingQuote.total : getQuoteDisplayTotal(selectedQuote))}</h4>
+                                        {/* Detailed Itinerary */}
+                                        {printQuote.itinerary?.length > 0 && (
+                                            <div className="mb-8">
+                                                <h3 className="quote-print-section-title text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-6 border-b-2 border-slate-100 pb-2">
+                                                    Planned Itinerary
+                                                </h3>
+                                                {(printQuote.transportation ||
+                                                    (Number(printQuote.vehiclePrice) || 0) >
+                                                        0) && (
+                                                    <p className="text-[10px] font-bold text-slate-600 mb-4">
+                                                        {printQuote.transportation
+                                                            ? `Travel vehicle: ${printQuote.transportation}`
+                                                            : ''}
+                                                        {(Number(printQuote.vehiclePrice) || 0) >
+                                                            0 &&
+                                                            ` · ${formatMoney(Number(printQuote.vehiclePrice) || 0)}`}
+                                                    </p>
+                                                )}
+                                                <div className="space-y-6">
+                                                    {printQuote.itinerary.map(
+                                                        (day: any, idx: number) => {
+                                                            const dayTitle =
+                                                                day.title || `Day ${idx + 1}`;
+                                                            const titleParts = dayTitle.split(':');
+                                                            const dayLabel = titleParts[0];
+                                                            const dayTheme =
+                                                                titleParts
+                                                                    .slice(1)
+                                                                    .join(':')
+                                                                    .trim() || 'Sightseeing';
+                                                            const activities = Array.isArray(
+                                                                day.activities
+                                                            )
+                                                                ? day.activities
+                                                                : [];
+                                                            return (
+                                                                <div
+                                                                    key={day.id || idx}
+                                                                    className="relative pl-8 border-l-2 border-slate-100 last:border-l-0"
+                                                                >
+                                                                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-4 border-slate-900" />
+                                                                    <div className="pdf-break-avoid mb-3">
+                                                                        <span className="text-[9px] font-black text-crm-600 uppercase tracking-widest">
+                                                                            {dayLabel}
+                                                                        </span>
+                                                                        <h4 className="font-black text-slate-900 text-sm uppercase tracking-tight leading-snug">
+                                                                            {dayTheme}
+                                                                        </h4>
+                                                                    </div>
+                                                                    {activities.length > 0 ? (
+                                                                        <div className="grid grid-cols-2 gap-3">
+                                                                            {activities.map(
+                                                                                (
+                                                                                    act: any,
+                                                                                    aIdx: number
+                                                                                ) => (
+                                                                                    <div
+                                                                                        key={aIdx}
+                                                                                        className="pdf-break-avoid bg-slate-50 rounded-xl p-3 border border-slate-100 overflow-visible"
+                                                                                    >
+                                                                                        <p className="text-[10px] font-black text-slate-800 mb-1 leading-snug break-words">
+                                                                                            {act.title ||
+                                                                                                act.name ||
+                                                                                                'Activity'}
+                                                                                        </p>
+                                                                                        {act.description && (
+                                                                                            <p className="text-[9px] text-slate-500 font-medium leading-relaxed break-words">
+                                                                                                {
+                                                                                                    act.description
+                                                                                                }
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )
+                                                                            )}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest italic">
+                                                                            Leisure / Free time
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        }
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Pricing: services, additional charge, GST, total */}
+                                        <div className="print-break-avoid mt-12 pt-8 border-t-4 border-slate-900">
+                                            <h3 className="quote-print-section-title text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-6">
+                                                Quote Summary
+                                            </h3>
+                                            <div className="space-y-3 mb-6">
+                                                <div className="flex justify-between items-center gap-4">
+                                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                        Hotel + Itinerary
+                                                    </p>
+                                                    <p className="text-xs font-black text-slate-800">
+                                                        {formatMoney(printPricing.subtotal)}
+                                                    </p>
+                                                </div>
+                                                {printPricing.additionalServiceCharge > 0 && (
+                                                    <div className="flex justify-between items-center gap-4">
+                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                            Additional Service Charge
+                                                        </p>
+                                                        <p className="text-xs font-black text-slate-800">
+                                                            {formatMoney(
+                                                                printPricing.additionalServiceCharge
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                                {(printPricing.gstOnPackage || 0) > 0 && (
+                                                    <div className="flex justify-between items-center gap-4">
+                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                            GST on Package (5%)
+                                                        </p>
+                                                        <p className="text-xs font-black text-slate-800">
+                                                            {formatMoney(
+                                                                printPricing.gstOnPackage || 0
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                                {(printPricing.gstOnAdditional || 0) > 0 && (
+                                                    <div className="flex justify-between items-center gap-4">
+                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                            GST on Additional (18%)
+                                                        </p>
+                                                        <p className="text-xs font-black text-slate-800">
+                                                            {formatMoney(
+                                                                printPricing.gstOnAdditional || 0
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex justify-between items-end gap-4 pt-4 border-t border-slate-200">
+                                                <div>
+                                                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-2">
+                                                        Inclusions
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase max-w-sm">
+                                                        Premium Stay, Flights, Guided Tours, Private
+                                                        Transfers, and All Applicable Taxes.
+                                                    </p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                                        Total Quote
+                                                    </p>
+                                                    <h4 className="text-4xl font-black text-crm-600 tracking-tighter">
+                                                        {formatMoney(printPricing.total)}
+                                                    </h4>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
+                                );
+                            })()}
 
                             {/* Document Footer */}
                             <div className="print-break-avoid pt-12 border-t border-slate-100 mt-12 flex justify-between items-start gap-8 print:pt-8 print:mt-8">
-                                <div className="flex-1 min-w-0">
+                                <div className="min-w-0 flex-auto">
                                     <QuoteTermsSection terms={resolvedPreviewTerms} variant="print" />
                                 </div>
                                 <div className="text-right shrink-0 print:hidden">
@@ -5943,6 +7358,7 @@ const Quotations = () => {
                                     <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{(editingQuote || selectedQuote)?.agentName || quoteBranding?.name || agencyName}</p>
                                 </div>
                             </div>
+                            <AgencyBankDetailsBlock details={agencyBankDetails} variant="print" />
                             </div>
                         </div>
                     </div>
@@ -5988,28 +7404,28 @@ const Quotations = () => {
                                     <div className="space-y-3">
                                         <div>
                                             <label className="form-label font-semibold">Hotel Cost & Description</label>
-                                            <input type="number" value={newPreset.hotelCost} onChange={e => setNewPreset({ ...newPreset, hotelCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
+                                            <NumberInput value={newPreset.hotelCost} onChange={e => setNewPreset({ ...newPreset, hotelCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
                                             <input type="text" value={newPreset.hotelDesc} onChange={e => setNewPreset({ ...newPreset, hotelDesc: e.target.value })} placeholder="Hotel Name" className="w-full px-3 py-1.5 border border-slate-100 rounded-lg text-[11px] bg-slate-50" />
                                         </div>
                                         <div>
                                             <label className="form-label font-semibold">Flight Cost & Description</label>
-                                            <input type="number" value={newPreset.flightCost} onChange={e => setNewPreset({ ...newPreset, flightCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
+                                            <NumberInput value={newPreset.flightCost} onChange={e => setNewPreset({ ...newPreset, flightCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
                                             <input type="text" value={newPreset.flightDesc} onChange={e => setNewPreset({ ...newPreset, flightDesc: e.target.value })} placeholder="Airline info" className="w-full px-3 py-1.5 border border-slate-100 rounded-lg text-[11px] bg-slate-50" />
                                         </div>
                                     </div>
                                     <div className="space-y-3">
                                         <div>
                                             <label className="form-label font-semibold">Visa Cost (Per Adult)</label>
-                                            <input type="number" value={newPreset.visaCost} onChange={e => setNewPreset({ ...newPreset, visaCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm" />
+                                            <NumberInput value={newPreset.visaCost} onChange={e => setNewPreset({ ...newPreset, visaCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm" />
                                         </div>
                                         <div>
                                             <label className="form-label font-semibold">Activity Cost & Description</label>
-                                            <input type="number" value={newPreset.activityCost} onChange={e => setNewPreset({ ...newPreset, activityCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
+                                            <NumberInput value={newPreset.activityCost} onChange={e => setNewPreset({ ...newPreset, activityCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm mb-1.5" />
                                             <input type="text" value={newPreset.activityDesc} onChange={e => setNewPreset({ ...newPreset, activityDesc: e.target.value })} placeholder="Activity highlights" className="w-full px-3 py-1.5 border border-slate-100 rounded-lg text-[11px] bg-slate-50" />
                                         </div>
                                         <div>
                                             <label className="form-label font-semibold">Transfer Cost</label>
-                                            <input type="number" value={newPreset.transferCost} onChange={e => setNewPreset({ ...newPreset, transferCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm" />
+                                            <NumberInput value={newPreset.transferCost} onChange={e => setNewPreset({ ...newPreset, transferCost: parseInt(e.target.value) || 0 })} className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm" />
                                         </div>
                                     </div>
                                 </div>

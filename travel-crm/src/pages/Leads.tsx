@@ -1,19 +1,25 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Plus, MoreVertical, MapPin, Calendar, X, CheckCircle2, User, Users, Phone, Mail, Edit2, Edit3, Trash2, FileText, Download, Filter, LayoutGrid, List, Clock, ArrowRight, ChevronRight, Globe, Plane, PlusSquare, Ban } from 'lucide-react';
+import NumberInput from '../components/NumberInput';
+import { Plus, MoreVertical, MapPin, Calendar, X, CheckCircle2, User, Users, Phone, Mail, Edit2, Edit3, Trash2, FileText, Download, Filter, LayoutGrid, List, Clock, ArrowRight, ChevronRight, Globe, Plane, PlusSquare, Ban, Search, Hotel as HotelIcon } from 'lucide-react';
 import DropdownChevron from '../components/DropdownChevron';
 import CopyableText from '../components/CopyableText';
 import CountryFlag from '../components/CountryFlag';
+import { CountryGroupedItemList } from '../components/CountryGroupedOptions';
 import CancelTripModal, { type CancelTripTarget } from '../components/CancelTripModal';
+import VisibleScrollArea from '../components/VisibleScrollArea';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDatabase } from '../context/DatabaseContext';
 import { packagePresets, calculateQuote, parseTravelers, guessPresetFromDestination, parseDurationNights } from '../utils/pricing';
 import { sourceCountries, internationalAirports } from '../utils/aviationData';
+import { buildCountryOptions, resolveWorldCountryName } from '../utils/worldLocations';
 import { getQuotePricingDisplay, getUnifiedBudgetForLead, getUnifiedTotalForQuote, isTemplatePackageQuote } from '../utils/pricingConsistency';
+import { formatHotelNightDateLabel, sumStayHotelTotal } from '../utils/hotelStayPricing';
 import { useCurrency } from '../hooks/useCurrency';
 import {
     applyTripCancellation,
     ensureCustomerRecord,
     filterStaffForAgentSession,
+    filterSubAgentsForAgentSession,
     getAgentFieldsFromLead,
     leadVisibleToUser,
     recordVisibleToSession,
@@ -69,16 +75,15 @@ const LEADS_VIEW_STORAGE_KEY = 'leads-view-mode';
 const parseLeadsViewMode = (value: string | null | undefined): 'pipeline' | 'list' =>
     value === 'list' ? 'list' : 'pipeline';
 
-const formatLeadScheduleDate = (lead: any): string => {
+const getLeadScheduleDateParts = (lead: any): { monthDay: string; year: string | null } => {
     if (lead?.startDate) {
         try {
             const date = new Date(`${lead.startDate}T12:00:00`);
             if (!isNaN(date.getTime())) {
-                return date.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                });
+                return {
+                    monthDay: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ',',
+                    year: String(date.getFullYear()),
+                };
             }
         } catch {
             /* fall through */
@@ -86,9 +91,33 @@ const formatLeadScheduleDate = (lead: any): string => {
     }
     if (lead?.dates && typeof lead.dates === 'string') {
         const start = lead.dates.split(' - ')[0]?.trim();
-        if (start) return start;
+        if (start) {
+            // Try "Jul 23, 2026" / "July 23, 2026"
+            const withYear = start.match(/^([A-Za-z]+\s+\d{1,2}),?\s+(\d{4})$/);
+            if (withYear) {
+                return { monthDay: `${withYear[1]},`, year: withYear[2] };
+            }
+            // Try ISO / parseable date
+            const parsed = new Date(start);
+            if (!isNaN(parsed.getTime()) && /\d{4}/.test(start)) {
+                return {
+                    monthDay: parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ',',
+                    year: String(parsed.getFullYear()),
+                };
+            }
+            return { monthDay: start, year: null };
+        }
     }
-    return 'TBD';
+    return { monthDay: 'TBD', year: null };
+};
+
+const formatLeadTravelersSummary = (travelers?: string): string => {
+    const { adults, kids } = parseTravelers(travelers);
+    const adultsLabel = `${adults} Adult${adults === 1 ? '' : 's'}`;
+    if (kids > 0) {
+        return `${adultsLabel}, ${kids} Kid${kids === 1 ? '' : 's'}`;
+    }
+    return adultsLabel;
 };
 
 const formatLeadCreatedDate = (lead: any): string => {
@@ -335,6 +364,51 @@ const QuoteDetailModal = ({ quote, onClose, onConfirm, onCustomise, db }: any) =
     const servicesLabel = isPackageQuote
         ? 'Services (Stay, Activities & More)'
         : 'Hotel + itinerary';
+    const hotelStays = (quote.hotelStays || []).filter((s: any) => s?.hotelId || s?.hotelInput);
+
+    const formatStayDayLabel = (d: Date) => {
+        const day = d.getDate();
+        const suffix =
+            day % 10 === 1 && day !== 11
+                ? 'st'
+                : day % 10 === 2 && day !== 12
+                  ? 'nd'
+                  : day % 10 === 3 && day !== 13
+                    ? 'rd'
+                    : 'th';
+        const month = d.toLocaleDateString('en-US', { month: 'short' });
+        return `${day}${suffix} ${month}`;
+    };
+
+    const getStayDateLabel = (stayIdx: number) => {
+        if (!quote.departureDate) return '';
+        const allStays = quote.hotelStays || [];
+        const stay = allStays[stayIdx];
+        const nights = Math.max(1, Number(stay?.nights || 1));
+        const offset = allStays
+            .slice(0, stayIdx)
+            .reduce((sum: number, s: any) => sum + Math.max(1, Number(s?.nights || 1)), 0);
+        const start = new Date(quote.departureDate);
+        if (Number.isNaN(start.getTime())) return '';
+        start.setDate(start.getDate() + offset);
+        const end = new Date(start);
+        end.setDate(end.getDate() + Math.max(0, nights - 1));
+        return nights === 1
+            ? formatStayDayLabel(start)
+            : `${formatStayDayLabel(start)} - ${formatStayDayLabel(end)}`;
+    };
+
+    const getNightStart = (stayIdx: number) => {
+        if (!quote.departureDate) return null;
+        const allStays = quote.hotelStays || [];
+        const offset = allStays
+            .slice(0, stayIdx)
+            .reduce((sum: number, s: any) => sum + Math.max(1, Number(s?.nights || 1)), 0);
+        const start = new Date(quote.departureDate);
+        if (Number.isNaN(start.getTime())) return null;
+        start.setDate(start.getDate() + offset);
+        return start;
+    };
 
     return (
         <div
@@ -385,49 +459,259 @@ const QuoteDetailModal = ({ quote, onClose, onConfirm, onCustomise, db }: any) =
                     </button>
                 </div>
 
-                {/* Content Area */}
-                <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-50/50">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* Itinerary Section */}
-                        <div className="lg:col-span-2 space-y-6">
-                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                                <Clock size={16} className="text-crm-600" /> Day-Wise Experience Plan
-                            </h3>
-                            <div className="space-y-4">
-                                {(quote.itinerary || []).map((day: any, idx: number) => (
-                                    <div key={day.id} className="relative pl-8 pb-4 group">
-                                        <div className="absolute left-[11px] top-4 bottom-0 w-[2px] bg-slate-200 group-last:bg-transparent" />
-                                        <div className="absolute left-0 top-1.5 w-6 h-6 rounded-full bg-white border-2 border-crm-500 flex items-center justify-center text-[10px] font-bold text-crm-700 z-10 shadow-sm">
-                                            {idx + 1}
-                                        </div>
-
-                                        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md hover:border-crm-200">
-                                            <h4 className="font-bold text-slate-800 text-sm mb-3">{day.title}</h4>
-                                            <div className="space-y-2">
-                                                {(day.activities || []).map((act: any, aIdx: number) => (
-                                                    <div key={aIdx} className="flex gap-3 items-start">
-                                                        <div className="mt-1 w-1.5 h-1.5 rounded-full bg-crm-400 shrink-0" />
-                                                        <span className="text-xs text-slate-600 leading-relaxed">{act.title}</span>
+                {/* Content Area — scrolls; Package Scope sticky on desktop */}
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 sm:p-8 custom-scrollbar bg-slate-50/50">
+                    <div className="flex flex-col lg:flex-row lg:items-start gap-6 lg:gap-8">
+                        {/* Hotel + Itinerary */}
+                        <div className="min-w-0 flex-1 space-y-8">
+                            {hotelStays.length > 0 && (
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                                        <HotelIcon size={16} className="text-crm-600" /> Hotel Selection
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {(quote.hotelStays || []).map((stay: any, idx: number) => {
+                                            if (!stay?.hotelId && !stay?.hotelInput) return null;
+                                            const hotel = (db?.hotels?.data || []).find(
+                                                (h: any) => h.id === stay.hotelId
+                                            );
+                                            const hotelName =
+                                                stay.hotelInput?.trim() || hotel?.name || 'Hotel';
+                                            const nights = Math.max(1, Number(stay.nights) || 1);
+                                            const stayDates = getStayDateLabel(idx);
+                                            const nightStart = getNightStart(idx);
+                                            const stayTotal = sumStayHotelTotal(stay);
+                                            const nightPrices = Array.isArray(stay.nightPrices)
+                                                ? stay.nightPrices.slice(0, nights)
+                                                : [];
+                                            const inclusions = (stay.specialInclusions || []).filter(
+                                                (s: any) => s?.name?.trim()
+                                            );
+                                            return (
+                                                <div
+                                                    key={stay.hotelId || idx}
+                                                    className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"
+                                                >
+                                                    <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                                                        <div className="min-w-0">
+                                                            <p className="text-[10px] font-black text-crm-600 uppercase tracking-widest">
+                                                                Stay {idx + 1}
+                                                                {stayDates ? ` · ${stayDates}` : ''}
+                                                            </p>
+                                                            <h4 className="font-bold text-slate-800 text-sm mt-0.5">
+                                                                {hotelName}
+                                                            </h4>
+                                                            <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                                                                {nights} night{nights > 1 ? 's' : ''}
+                                                                {(stay.city || hotel?.city) &&
+                                                                    ` · ${stay.city || hotel?.city}`}
+                                                            </p>
+                                                        </div>
+                                                        {stayTotal > 0 && (
+                                                            <span className="text-sm font-black text-crm-700 shrink-0">
+                                                                {formatMoney(stayTotal)}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                ))}
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                                                        <div>
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                Room
+                                                            </p>
+                                                            <p className="font-semibold text-slate-700 mt-0.5">
+                                                                {stay.roomType || 'Standard'}
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                Meal plan
+                                                            </p>
+                                                            <p className="font-semibold text-slate-700 mt-0.5">
+                                                                {stay.mealPlan ||
+                                                                    quote.hotelMealPlan ||
+                                                                    '—'}
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                Rooms / Pax
+                                                            </p>
+                                                            <p className="font-semibold text-slate-700 mt-0.5">
+                                                                {stay.rooms || 1} room ·{' '}
+                                                                {stay.personsPerRoom || 2} pax/room
+                                                            </p>
+                                                        </div>
+                                                        {(stay.extraBed || 0) > 0 && (
+                                                            <div>
+                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                    Extra beds
+                                                                </p>
+                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                    {stay.extraBed} @{' '}
+                                                                    {formatMoney(
+                                                                        stay.extraBedPrice || 0
+                                                                    )}
+                                                                    /night
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {(stay.childWithBed || 0) > 0 && (
+                                                            <div>
+                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                    Child with bed
+                                                                </p>
+                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                    {stay.childWithBed} @{' '}
+                                                                    {formatMoney(
+                                                                        stay.childWithBedPrice || 0
+                                                                    )}
+                                                                    /night
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {(stay.childWithoutBed || 0) > 0 && (
+                                                            <div>
+                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                    Child w/o bed
+                                                                </p>
+                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                    {stay.childWithoutBed} @{' '}
+                                                                    {formatMoney(
+                                                                        stay.childWithoutBedPrice || 0
+                                                                    )}
+                                                                    /night
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {nightPrices.length > 0 && (
+                                                        <div className="mt-3 pt-3 border-t border-slate-100">
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                                                                Night-wise stays
+                                                            </p>
+                                                            <ul className="space-y-1.5">
+                                                                {nightPrices.map(
+                                                                    (np: any, nIdx: number) => {
+                                                                        const nightDate = nightStart
+                                                                            ? new Date(nightStart)
+                                                                            : null;
+                                                                        if (nightDate) {
+                                                                            nightDate.setDate(
+                                                                                nightDate.getDate() +
+                                                                                    nIdx
+                                                                            );
+                                                                        }
+                                                                        const dateLabel = nightDate
+                                                                            ? formatHotelNightDateLabel(
+                                                                                  nightDate
+                                                                              )
+                                                                            : null;
+                                                                        const amount = Number.isFinite(
+                                                                            Number(np?.given)
+                                                                        )
+                                                                            ? Number(np.given)
+                                                                            : Number(np?.rate) || 0;
+                                                                        return (
+                                                                            <li
+                                                                                key={nIdx}
+                                                                                className="flex items-center justify-between gap-3 text-xs"
+                                                                            >
+                                                                                <span className="font-semibold text-slate-700">
+                                                                                    Night {nIdx + 1}
+                                                                                    {dateLabel
+                                                                                        ? ` · ${dateLabel.datePart}`
+                                                                                        : ''}
+                                                                                </span>
+                                                                                <span className="font-black text-crm-700 shrink-0">
+                                                                                    {formatMoney(
+                                                                                        amount
+                                                                                    )}
+                                                                                </span>
+                                                                            </li>
+                                                                        );
+                                                                    }
+                                                                )}
+                                                            </ul>
+                                                        </div>
+                                                    )}
+                                                    {inclusions.length > 0 && (
+                                                        <ul className="mt-3 text-[11px] text-slate-600 space-y-0.5">
+                                                            {inclusions.map((s: any) => (
+                                                                <li key={s.id || s.name}>
+                                                                    + {s.name}
+                                                                    {s.amount != null && s.amount > 0
+                                                                        ? ` (${formatMoney(s.amount)})`
+                                                                        : ''}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                                    <Clock size={16} className="text-crm-600" /> Day-Wise Itinerary Plan
+                                </h3>
+                                {(quote.transportation ||
+                                    (Number(quote.vehiclePrice) || 0) > 0) && (
+                                    <p className="text-xs font-semibold text-slate-600 -mt-1">
+                                        {quote.transportation ? (
+                                            <>
+                                                Travel vehicle:{' '}
+                                                <span className="text-crm-700 font-black">
+                                                    {quote.transportation}
+                                                </span>
+                                            </>
+                                        ) : null}
+                                        {(Number(quote.vehiclePrice) || 0) > 0 && (
+                                            <span className={quote.transportation ? ' ml-1' : ''}>
+                                                {quote.transportation ? '· ' : ''}
+                                                {formatMoney(Number(quote.vehiclePrice) || 0)}
+                                            </span>
+                                        )}
+                                    </p>
+                                )}
+                                <div className="space-y-4">
+                                    {(quote.itinerary || []).map((day: any, idx: number) => (
+                                        <div key={day.id} className="relative pl-8 pb-4 group">
+                                            <div className="absolute left-[11px] top-4 bottom-0 w-[2px] bg-slate-200 group-last:bg-transparent" />
+                                            <div className="absolute left-0 top-1.5 w-6 h-6 rounded-full bg-white border-2 border-crm-500 flex items-center justify-center text-[10px] font-bold text-crm-700 z-10 shadow-sm">
+                                                {idx + 1}
+                                            </div>
+
+                                            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md hover:border-crm-200">
+                                                <h4 className="font-bold text-slate-800 text-sm mb-3">{day.title}</h4>
+                                                <div className="space-y-2">
+                                                    {(day.activities || []).map((act: any, aIdx: number) => (
+                                                        <div key={aIdx} className="flex gap-3 items-start">
+                                                            <div className="mt-1 w-1.5 h-1.5 rounded-full bg-crm-400 shrink-0" />
+                                                            <span className="text-xs text-slate-600 leading-relaxed">{act.title}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
-                                {(!quote.itinerary || quote.itinerary.length === 0) && (
-                                    <div className="p-8 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 italic text-sm">
-                                        Standard package activities included.
-                                    </div>
-                                )}
+                                    ))}
+                                    {(!quote.itinerary || quote.itinerary.length === 0) && (
+                                        <div className="p-8 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 italic text-sm">
+                                            Standard package activities included.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
-                        {/* Sidebar Details */}
-                        <div className="space-y-6">
+                        {/* Package Scope — sticky while content scrolls on desktop */}
+                        <aside className="w-full lg:w-[280px] xl:w-[300px] shrink-0 lg:sticky lg:top-0 lg:self-start space-y-4">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                                <User size={16} className="text-crm-600" /> Package Scope
+                            </h3>
                             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                    <User size={14} className="text-indigo-500" /> Package Scope
-                                </h3>
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-500">Travelers</span>
@@ -461,7 +745,25 @@ const QuoteDetailModal = ({ quote, onClose, onConfirm, onCustomise, db }: any) =
                                                 </span>
                                             </div>
                                         )}
-                                        {quotePricing.taxes > 0 && (
+                                        {(quotePricing.gstOnPackage || 0) > 0 && (
+                                            <div className="flex justify-between items-center text-[11px]">
+                                                <span className="text-slate-500">GST on Package (5%)</span>
+                                                <span className="font-bold text-emerald-700">
+                                                    {formatMoney(quotePricing.gstOnPackage || 0)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {(quotePricing.gstOnAdditional || 0) > 0 && (
+                                            <div className="flex justify-between items-center text-[11px]">
+                                                <span className="text-slate-500">GST on Additional (18%)</span>
+                                                <span className="font-bold text-emerald-700">
+                                                    {formatMoney(quotePricing.gstOnAdditional || 0)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {(quotePricing.gstOnPackage || 0) <= 0 &&
+                                            (quotePricing.gstOnAdditional || 0) <= 0 &&
+                                            quotePricing.taxes > 0 && (
                                             <div className="flex justify-between items-center text-[11px]">
                                                 <span className="text-slate-500">GST</span>
                                                 <span className="font-bold text-emerald-700">
@@ -478,67 +780,70 @@ const QuoteDetailModal = ({ quote, onClose, onConfirm, onCustomise, db }: any) =
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        </aside>
                     </div>
                 </div>
 
                 {/* Footer Action Bar */}
-                <div className="p-6 bg-slate-900 border-t border-slate-800 flex justify-between items-center shrink-0">
-                    <div className="hidden md:block">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase block">Negotiation Round</span>
-                        <span className="text-sm font-bold text-white flex items-center gap-2">
-                            Proposal Version {quote.version || '1'} <ArrowRight size={14} className="text-crm-500" /> Stage: {(quote.status || 'draft').toUpperCase()}
-                        </span>
-                    </div>
-                    <div className="flex gap-4 w-full md:w-auto items-center">
-                        <button
-                            onClick={() => {
-                                onClose();
-                                navigate(`/quotations?editMode=true&quoteId=${quote.id}`);
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-white transition-all text-[11px] font-bold uppercase tracking-widest border border-slate-800 rounded-lg hover:border-slate-600"
-                        >
-                            <Edit3 size={14} /> Modify Content
-                        </button>
-                        <div className="h-8 w-px bg-slate-800 mx-1 hidden md:block"></div>
-                        {!showCustForm ? (
-                            <>
-                                <button
-                                    onClick={() => setShowCustForm(true)}
-                                    className="flex-1 md:flex-none px-6 py-3 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 transition-all font-mono"
-                                >
-                                    /special_request
-                                </button>
-                                <button
-                                    onClick={() => onConfirm(quote)}
-                                    className="flex-1 md:flex-none px-10 py-3 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/20 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
-                                >
-                                    Confirm Package <CheckCircle2 size={18} />
-                                </button>
-                            </>
-                        ) : (
-                            <div className="flex gap-3 w-full animate-in slide-in-from-right-4">
-                                <input
-                                    autoFocus
-                                    value={custRequest}
-                                    onChange={e => setCustRequest(e.target.value)}
-                                    placeholder="Describe your adjustments here..."
-                                    className="flex-1 bg-slate-800 border-none rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-1 focus:ring-crm-500"
-                                />
-                                <button
-                                    onClick={() => onCustomise(quote, custRequest)}
-                                    className="px-6 py-3 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold transition-all"
-                                >
-                                    Send Feedback
-                                </button>
-                                <button
-                                    onClick={() => setShowCustForm(false)}
-                                    className="px-4 py-3 text-slate-500 hover:text-white transition-all"
-                                >
-                                    <X size={20} />
-                                </button>
-                            </div>
-                        )}
+                <div className="p-4 sm:p-5 bg-slate-900 border-t border-slate-800 shrink-0 overflow-hidden">
+                    <div className="flex flex-col xl:flex-row xl:items-center gap-3 xl:gap-4 min-w-0">
+                        <div className="hidden md:block shrink-0 min-w-0">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase block">Negotiation Round</span>
+                            <span className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                                Proposal Version {quote.version || '1'}{' '}
+                                <ArrowRight size={14} className="text-crm-500 shrink-0" />{' '}
+                                Stage: {(quote.status || 'draft').toUpperCase()}
+                            </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full xl:flex-1 xl:justify-end min-w-0">
+                            <button
+                                onClick={() => {
+                                    onClose();
+                                    navigate(`/quotations?editMode=true&quoteId=${quote.id}`);
+                                }}
+                                className="inline-flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-white transition-all text-[11px] font-bold uppercase tracking-widest border border-slate-800 rounded-lg hover:border-slate-600 whitespace-nowrap shrink-0"
+                            >
+                                <Edit3 size={14} /> Modify Content
+                            </button>
+                            {!showCustForm ? (
+                                <>
+                                    <button
+                                        onClick={() => setShowCustForm(true)}
+                                        className="px-4 py-2.5 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-800 transition-all font-mono whitespace-nowrap shrink-0"
+                                    >
+                                        /special_request
+                                    </button>
+                                    <button
+                                        onClick={() => onConfirm(quote)}
+                                        className="px-5 sm:px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/20 rounded-xl text-sm font-bold inline-flex items-center justify-center gap-2 transition-all active:scale-95 whitespace-nowrap shrink-0"
+                                    >
+                                        Confirm Package <CheckCircle2 size={18} />
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="flex flex-wrap gap-2 w-full min-w-0 animate-in slide-in-from-right-4">
+                                    <input
+                                        autoFocus
+                                        value={custRequest}
+                                        onChange={e => setCustRequest(e.target.value)}
+                                        placeholder="Describe your adjustments here..."
+                                        className="flex-1 min-w-[12rem] bg-slate-800 border-none rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:ring-1 focus:ring-crm-500"
+                                    />
+                                    <button
+                                        onClick={() => onCustomise(quote, custRequest)}
+                                        className="px-5 py-2.5 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold transition-all shrink-0"
+                                    >
+                                        Send Feedback
+                                    </button>
+                                    <button
+                                        onClick={() => setShowCustForm(false)}
+                                        className="px-3 py-2.5 text-slate-500 hover:text-white transition-all shrink-0"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -797,41 +1102,57 @@ const AgentLeadsView = () => {
         );
     }, [db, userRole, userEmail, currentAgentId]);
 
-    // Harvest ALL destinations from across the entire catalog (Match Studio behavior)
+    // Full world country list (same as Quotations), merged with any catalog-only labels
     const activeDestinations = useMemo(() => {
-        const uniqueDests = new Set<string>();
+        const isCatalogCountry = (name: string) => {
+            const normalized = name.trim().toLowerCase();
+            return normalized.length > 0 && normalized !== 'global';
+        };
 
-        // Collect from all catalog sources
-        (db.hotels?.data || []).forEach((h: any) => uniqueDests.add(h.location?.split(',').pop()?.trim() || h.destination?.split(',').pop()?.trim() || ''));
-        (db.activities?.data || []).forEach((a: any) => uniqueDests.add(a.location?.split(',').pop()?.trim() || a.country?.split(',').pop()?.trim() || ''));
-        (db.customPresets?.data || []).forEach((p: any) => uniqueDests.add(p.destination?.split(',').pop()?.trim() || ''));
+        const catalogCountries: string[] = [];
+        (db.hotels?.data || []).forEach((h: any) => {
+            const c = h.location?.split(',').pop()?.trim() || h.destination?.split(',').pop()?.trim() || '';
+            if (c && isCatalogCountry(c)) catalogCountries.push(c);
+        });
+        (db.activities?.data || []).forEach((a: any) => {
+            const c = a.location?.split(',').pop()?.trim() || a.country?.split(',').pop()?.trim() || '';
+            if (c && isCatalogCountry(c)) catalogCountries.push(c);
+        });
+        (db.customPresets?.data || []).forEach((p: any) => {
+            const c = p.destination?.split(',').pop()?.trim() || '';
+            if (c && isCatalogCountry(c)) catalogCountries.push(c);
+        });
 
-        return Array.from(uniqueDests)
-            .filter(Boolean)
-            .filter((countryName) => countryName.toLowerCase() !== 'global')
-            .sort()
-            .map(countryName => {
-                // Find matching master destination for flag and data
-                const masterDest = (db.destinations?.data || []).find(
-                    (d: any) =>
-                        String(d.country || '').toLowerCase() === countryName.toLowerCase() ||
-                        String(d.name || '').toLowerCase() === countryName.toLowerCase()
+        return buildCountryOptions(catalogCountries).map((countryName) => {
+            const resolvedCountry = resolveWorldCountryName(countryName) || countryName;
+            const masterDest = (db.destinations?.data || []).find(
+                (d: any) =>
+                    resolveWorldCountryName(String(d.country || '')) === resolvedCountry ||
+                    resolveWorldCountryName(String(d.name || '')) === resolvedCountry ||
+                    String(d.country || '').toLowerCase() === countryName.toLowerCase() ||
+                    String(d.name || '').toLowerCase() === countryName.toLowerCase()
+            );
+            const masterFlag = masterDest?.flag;
+            const sourceFlag = sourceCountries.find(
+                (sc) => resolveWorldCountryName(sc.name) === resolvedCountry || sc.name.toLowerCase() === countryName.toLowerCase()
+            )?.flag;
+
+            const matchedPreset = (db.customPresets?.data || []).find((p: any) => {
+                const destCountry = resolveWorldCountryName(
+                    String(p.destination || '').split(',').pop()?.trim() || String(p.destination || '')
                 );
-                const masterFlag = masterDest?.flag;
-                const sourceFlag = sourceCountries.find(sc => sc.name.toLowerCase() === countryName.toLowerCase())?.flag;
-
-                // Find matching preset
-                const matchedPreset = (db.customPresets?.data || []).find((p: any) => p.destination?.toLowerCase().includes(countryName.toLowerCase()));
-
-                return {
-                    id: matchedPreset?.id || countryName, // Use countryName as fallback ID
-                    presetId: matchedPreset?.id || '',
-                    country: countryName,
-                    name: masterDest?.name || countryName,
-                    flag: masterFlag || sourceFlag || '🌐',
-                    destination: matchedPreset?.destination || countryName
-                };
+                return destCountry === resolvedCountry;
             });
+
+            return {
+                id: matchedPreset?.id || countryName,
+                presetId: matchedPreset?.id || '',
+                country: countryName,
+                name: masterDest?.name || matchedPreset?.name || countryName,
+                flag: masterFlag || sourceFlag || '🌐',
+                destination: matchedPreset?.destination || countryName,
+            };
+        });
     }, [db.hotels?.data, db.activities?.data, db.customPresets?.data, db.destinations?.data]);
 
     const [showModal, setShowModal] = useState(false);
@@ -897,12 +1218,194 @@ const AgentLeadsView = () => {
     const [formHotelId, setFormHotelId] = useState('');
     const [formLeadNote, setFormLeadNote] = useState('');
     const [isDestinationDropdownOpen, setIsDestinationDropdownOpen] = useState(false);
+    const [destinationCountrySearch, setDestinationCountrySearch] = useState('');
+    const [isAssigneeDropdownOpen, setIsAssigneeDropdownOpen] = useState(false);
+    const [assigneeSearch, setAssigneeSearch] = useState('');
 
     const [showReportModal, setShowReportModal] = useState(false);
     const [reportTimeframe, setReportTimeframe] = useState('month');
     const [cancelTarget, setCancelTarget] = useState<CancelTripTarget | null>(null);
     const [customDateFrom, setCustomDateFrom] = useState('');
     const [customDateTo, setCustomDateTo] = useState('');
+
+    /** Prefer localStorage agentId; fall back to agent matched by login email. */
+    const resolvedSessionAgentId = useMemo(() => {
+        if (currentAgentId) return currentAgentId;
+        const byEmail = (db.travelAgents?.data || []).find(
+            (a: any) => String(a.email || '').toLowerCase() === String(userEmail || '').toLowerCase()
+        );
+        return byEmail?.id || null;
+    }, [currentAgentId, db.travelAgents?.data, userEmail]);
+
+    const leadAssigneeStaffOptions = useMemo(
+        () => filterStaffForAgentSession(db.staff?.data || [], resolvedSessionAgentId, db),
+        [db, resolvedSessionAgentId]
+    );
+
+    const leadAssigneeSubAgentOptions = useMemo(
+        () => filterSubAgentsForAgentSession(db.travelAgents?.data || [], resolvedSessionAgentId, db),
+        [db, resolvedSessionAgentId]
+    );
+
+    const assigneeEmptyLabel =
+        userRole === 'admin' ? 'Direct Lead (No Agent)' : 'Me (Direct Handling)';
+
+    const leadAssigneeOptions = useMemo(() => {
+        const options: Array<{
+            value: string;
+            label: string;
+            searchText: string;
+            kind: 'self' | 'agent' | 'staff' | 'sub-agent';
+        }> = [
+            {
+                value: '',
+                label: assigneeEmptyLabel,
+                searchText: assigneeEmptyLabel.toLowerCase(),
+                kind: 'self',
+            },
+        ];
+
+        if (userRole === 'admin') {
+            (db.travelAgents?.data || []).forEach((agent: any) => {
+                const label = `${agent.name || 'Agent'} — ${agent.businessName || agent.email || agent.id}`;
+                options.push({
+                    value: agent.id,
+                    label,
+                    searchText: [
+                        agent.name,
+                        agent.businessName,
+                        agent.email,
+                        agent.phone,
+                        agent.id,
+                    ]
+                        .filter(Boolean)
+                        .join(' ')
+                        .toLowerCase(),
+                    kind: agent.parentId ? 'sub-agent' : 'agent',
+                });
+            });
+            return options;
+        }
+
+        leadAssigneeStaffOptions.forEach((member: any) => {
+            const label = `Staff: ${member.name} (${member.role || 'Staff'})`;
+            options.push({
+                value: member.employeeId,
+                label,
+                searchText: [member.name, member.role, member.employeeId, member.email, member.phone]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase(),
+                kind: 'staff',
+            });
+        });
+
+        leadAssigneeSubAgentOptions.forEach((subAgent: any) => {
+            const label = `Sub-agent: ${subAgent.name} — ${subAgent.businessName || subAgent.email || subAgent.id}`;
+            options.push({
+                value: subAgent.id,
+                label,
+                searchText: [
+                    subAgent.name,
+                    subAgent.businessName,
+                    subAgent.email,
+                    subAgent.phone,
+                    subAgent.id,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase(),
+                kind: 'sub-agent',
+            });
+        });
+
+        return options;
+    }, [
+        userRole,
+        assigneeEmptyLabel,
+        db.travelAgents?.data,
+        leadAssigneeStaffOptions,
+        leadAssigneeSubAgentOptions,
+    ]);
+
+    const filteredLeadAssigneeOptions = useMemo(() => {
+        const q = assigneeSearch.trim().toLowerCase();
+        if (!q) return leadAssigneeOptions;
+        return leadAssigneeOptions.filter(
+            (opt) => opt.searchText.includes(q) || opt.label.toLowerCase().includes(q)
+        );
+    }, [leadAssigneeOptions, assigneeSearch]);
+
+    const selectedAssigneeOptionLabel = useMemo(() => {
+        const match = leadAssigneeOptions.find((opt) => opt.value === formAgentId);
+        return match?.label || assigneeEmptyLabel;
+    }, [leadAssigneeOptions, formAgentId, assigneeEmptyLabel]);
+
+    const closeAssigneeDropdown = useCallback(() => {
+        setIsAssigneeDropdownOpen(false);
+        setAssigneeSearch('');
+    }, []);
+
+    const selectedLeadAssignee = useMemo(() => {
+        const agents = db.travelAgents?.data || [];
+        const staff = db.staff?.data || [];
+
+        const fromAgent = (agent: any, kind: 'agent' | 'sub-agent' | 'self') =>
+            agent
+                ? {
+                      kind,
+                      name: agent.name || agent.businessName || '—',
+                      businessName: agent.businessName || '',
+                      email: String(agent.email || '').trim(),
+                      phone: String(agent.phone || '').trim(),
+                      roleLabel: kind === 'sub-agent' ? 'Sub-agent' : agent.parentId ? 'Sub-agent' : 'Agent',
+                  }
+                : null;
+
+        const fromStaff = (member: any) =>
+            member
+                ? {
+                      kind: 'staff' as const,
+                      name: member.name || '—',
+                      businessName: member.role || 'Staff',
+                      email: String(member.email || '').trim(),
+                      phone: String(member.phone || '').trim(),
+                      roleLabel: member.role ? `Staff · ${member.role}` : 'Staff',
+                  }
+                : null;
+
+        if (formAgentId) {
+            const agent = agents.find((a: any) => a.id === formAgentId);
+            if (agent) return fromAgent(agent, agent.parentId ? 'sub-agent' : 'agent');
+            const member = staff.find(
+                (s: any) => s.employeeId === formAgentId || s.id === formAgentId
+            );
+            if (member) return fromStaff(member);
+        }
+
+        // Empty selection: show "Me" details for agent/staff sessions
+        if (userRole === 'agent') {
+            const me =
+                agents.find((a: any) => a.id === resolvedSessionAgentId) ||
+                agents.find(
+                    (a: any) =>
+                        String(a.email || '').toLowerCase() === String(userEmail || '').toLowerCase()
+                );
+            return fromAgent(me, 'self');
+        }
+
+        if (userRole === 'staff') {
+            const me = staff.find(
+                (s: any) =>
+                    s.employeeId === userEmail ||
+                    s.id === userEmail ||
+                    String(s.employeeId || '').toLowerCase() === String(userEmail || '').toLowerCase()
+            );
+            return fromStaff(me);
+        }
+
+        return null;
+    }, [db.travelAgents?.data, db.staff?.data, formAgentId, userRole, resolvedSessionAgentId, userEmail]);
 
     useEffect(() => {
         const leadId = searchParams.get('highlightLeadId');
@@ -931,6 +1434,19 @@ const AgentLeadsView = () => {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const scrollIntervalRef = useRef<number | null>(null);
     const startDateRef = useRef<HTMLInputElement>(null);
+
+    /** Tablet / mobile: normal swipe scroll + visible bar (no edge auto-scroll). */
+    const [isTabletOrBelow, setIsTabletOrBelow] = useState(() =>
+        typeof window !== 'undefined' ? window.matchMedia('(max-width: 1024px)').matches : false
+    );
+
+    useEffect(() => {
+        const mq = window.matchMedia('(max-width: 1024px)');
+        const onChange = () => setIsTabletOrBelow(mq.matches);
+        onChange();
+        mq.addEventListener('change', onChange);
+        return () => mq.removeEventListener('change', onChange);
+    }, []);
 
     const openScheduleDatePicker = () => {
         const input = startDateRef.current;
@@ -979,6 +1495,7 @@ const AgentLeadsView = () => {
 
 
     const startScroll = (direction: 'left' | 'right') => {
+        if (isTabletOrBelow) return;
         if (scrollIntervalRef.current) return;
         scrollIntervalRef.current = window.setInterval(() => {
             if (scrollContainerRef.current) {
@@ -995,7 +1512,8 @@ const AgentLeadsView = () => {
     };
 
     const handleMouseMoveOrDrag = (e: React.MouseEvent | React.DragEvent) => {
-        if (!scrollContainerRef.current) return;
+        // Desktop only — tablet/mobile use normal overflow swipe scrolling
+        if (isTabletOrBelow || !scrollContainerRef.current) return;
         const rect = scrollContainerRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
 
@@ -1008,6 +1526,10 @@ const AgentLeadsView = () => {
             stopScroll();
         }
     };
+
+    useEffect(() => {
+        if (isTabletOrBelow) stopScroll();
+    }, [isTabletOrBelow]);
 
     useEffect(() => {
         return () => stopScroll();
@@ -1034,6 +1556,9 @@ const AgentLeadsView = () => {
         setPhoneError('');
         setFormLeadNote('');
         setIsDestinationDropdownOpen(false);
+        setDestinationCountrySearch('');
+        setIsAssigneeDropdownOpen(false);
+        setAssigneeSearch('');
         setShowModal(true);
     };
 
@@ -1074,17 +1599,23 @@ const AgentLeadsView = () => {
         setFormAdults(adults);
         setFormKids(kids);
         const leadDest = String(lead.destination || '').trim();
+        const leadCountryRaw = leadDest ? leadDest.split(',').pop()?.trim() || leadDest : '';
+        const leadCountry = resolveWorldCountryName(leadCountryRaw) || leadCountryRaw;
         const resolvedPresetId =
             lead.presetId ||
-            (leadDest ? leadDest.split(',').pop()?.trim() : '') ||
+            leadCountry ||
             leadDest;
         setFormPresetId(resolvedPresetId || '');
 
         // Restore full destination
         const matchedDest = activeDestinations.find(
-            (d) => (resolvedPresetId && d.id === resolvedPresetId) || (leadDest && d.country === leadDest)
+            (d) =>
+                (lead.presetId && d.id === lead.presetId) ||
+                (leadCountry && resolveWorldCountryName(d.country) === leadCountry) ||
+                (leadDest && (d.destination === leadDest || d.country === leadDest))
         );
         setFormDestinationCountry(matchedDest?.destination || leadDest || '');
+        setDestinationCountrySearch('');
         setFormAgentId(resolveLeadAssigneeFormValue(lead, db));
         setFormNeedFlight(lead.needFlight !== undefined ? lead.needFlight : true);
         setFormFlightMeal(lead.flightMeal || { optIn: true, type: 'Veg' });
@@ -1106,10 +1637,34 @@ const AgentLeadsView = () => {
 
         setPhoneError('');
         setIsDestinationDropdownOpen(false);
+        setIsAssigneeDropdownOpen(false);
+        setAssigneeSearch('');
         setShowModal(true);
     };
 
-    const selectedDestination = activeDestinations.find((d) => d.id === formPresetId) || null;
+    const selectedDestination =
+        activeDestinations.find((d) => d.id === formPresetId) ||
+        activeDestinations.find(
+            (d) =>
+                (formDestinationCountry &&
+                    (d.destination === formDestinationCountry ||
+                        resolveWorldCountryName(d.country) ===
+                            resolveWorldCountryName(formDestinationCountry))) ||
+                (formPresetId &&
+                    resolveWorldCountryName(d.country) === resolveWorldCountryName(formPresetId))
+        ) ||
+        null;
+
+    const filteredDestinations = useMemo(() => {
+        const q = destinationCountrySearch.trim().toLowerCase();
+        if (!q) return activeDestinations;
+        return activeDestinations.filter(
+            (d) =>
+                d.country.toLowerCase().includes(q) ||
+                d.name.toLowerCase().includes(q) ||
+                d.destination.toLowerCase().includes(q)
+        );
+    }, [activeDestinations, destinationCountrySearch]);
 
     const handleDeleteLead = (id: string) => {
         if (window.confirm('Move this lead to Deleted? You can still find it in the Deleted column.')) {
@@ -1455,14 +2010,14 @@ const AgentLeadsView = () => {
 
     return (
         <div className="h-full min-h-0 flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-                <div>
-                    <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                        <Users className="text-crm-600" size={28} />
+            <div className="flex flex-col max-lg:gap-3 lg:flex-row lg:items-center lg:justify-between mb-4 lg:mb-6 shrink-0">
+                <div className="min-w-0">
+                    <h1 className="text-xl lg:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 lg:gap-3">
+                        <Users className="text-crm-600 shrink-0" size={22} />
                         Leads
                     </h1>
                     {(userRole === 'admin' || userRole === 'agent') && (
-                    <p className="text-slate-500 text-sm font-medium">
+                    <p className="text-slate-500 text-xs lg:text-sm font-medium mt-0.5">
                         {userRole === 'admin' ? 'Master Global Lead Control' :
                             'Agency Lead Pipeline & Performance'}
                         {' · '}
@@ -1472,11 +2027,14 @@ const AgentLeadsView = () => {
                     </p>
                     )}
                 </div>
-                <div className="flex items-center gap-3">
-                    <button onClick={openAddModal} className="btn-primary flex items-center gap-2 shadow-crm-600/20">
-                        <Plus size={18} /> Add Lead
+                <div className="flex items-center gap-2 lg:gap-3 w-full lg:w-auto">
+                    <button
+                        onClick={openAddModal}
+                        className="flex items-center justify-center gap-1.5 py-2 px-3 lg:px-6 text-[10px] lg:text-xs font-bold uppercase tracking-widest whitespace-nowrap rounded-xl text-white bg-crm-600 hover:bg-crm-700 shadow-sm shadow-crm-600/20 transition-all active:scale-95 shrink-0"
+                    >
+                        <Plus size={16} /> Add Lead
                     </button>
-                    <div className="flex items-center bg-white border border-slate-200 p-1 rounded-lg shadow-sm mr-2">
+                    <div className="flex items-center bg-white border border-slate-200 p-1 rounded-lg shadow-sm shrink-0">
                         <button
                             onClick={() => setViewMode('pipeline')}
                             className={`p-1.5 rounded-md flex items-center gap-2 text-sm font-medium transition-all ${viewMode === 'pipeline' ? 'bg-crm-50 text-crm-600 shadow-inner' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
@@ -1494,62 +2052,104 @@ const AgentLeadsView = () => {
                     </div>
                     <button
                         onClick={() => setShowReportModal(true)}
-                        className="btn-secondary flex items-center gap-2 bg-white border border-slate-200 shadow-sm"
+                        className="flex items-center justify-center gap-1.5 py-2 px-3 lg:px-6 text-[10px] lg:text-xs font-bold uppercase tracking-widest whitespace-nowrap rounded-xl text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 shadow-sm transition-all active:scale-95 shrink-0 ml-auto lg:ml-0"
                     >
-                        <FileText size={18} className="text-slate-500" />
+                        <FileText size={16} className="text-slate-500" />
                         Reports
                     </button>
                 </div>
             </div>
 
             {viewMode === 'pipeline' ? (
-                <div
-                    ref={scrollContainerRef}
-                    onMouseMove={handleMouseMoveOrDrag}
-                    onMouseLeave={stopScroll}
-                    onDragOver={(e) => {
-                        handleDragOver(e);
-                        handleMouseMoveOrDrag(e);
-                    }}
-                    onDragLeave={stopScroll}
-                    className="flex-1 min-h-0 flex gap-6 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-                >
-                    {visibleColumns.map(column => {
-                        const colLeads = leads.filter((l: any) => leadMatchesKanbanColumn(l, column.id, db));
+                isTabletOrBelow ? (
+                    <VisibleScrollArea className="touch-pan-x">
+                        <div className="flex gap-6 h-full min-h-[420px] w-max pr-1">
+                            {visibleColumns.map(column => {
+                                const colLeads = leads.filter((l: any) => leadMatchesKanbanColumn(l, column.id, db));
 
-                        return (
-                            <div key={column.id} className="min-w-[320px] w-[320px] flex flex-col">
-                                <div className={`px-4 py-2.5 rounded-t-xl font-medium border-b-2 flex justify-between items-center ${column.color}`}>
-                                    <span className="text-sm uppercase tracking-wider font-semibold">{column.title}</span>
-                                    <span className="bg-white/50 px-2 py-0.5 rounded-full text-xs font-bold">{colLeads.length}</span>
-                                </div>
-                                <div
-                                    className="flex-1 bg-slate-100/50 p-3 rounded-b-xl border border-t-0 border-slate-200 overflow-y-auto"
-                                    onDrop={(e) => handleDrop(e, column.id)}
-                                    onDragOver={handleDragOver}
-                                >
-                                    {colLeads.map((lead: any, idx: number) => (
-                                        <LeadCard
-                                            key={`${lead.id}-${idx}`}
-                                            lead={lead}
-                                            onDragStart={handleDragStart}
-                                            onEdit={openEditModal}
-                                            onDelete={handleDeleteLead}
-                                            onCancel={openCancelModal}
-                                            isHighlighted={highlightedLeadId === lead.id}
-                                        />
-                                    ))}
-
-                                    {colLeads.length === 0 && (
-                                        <div className="h-24 flex items-center justify-center text-sm font-medium text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-                                            Drop leads here
+                                return (
+                                    <div key={column.id} className="min-w-[280px] w-[280px] sm:min-w-[300px] sm:w-[300px] flex flex-col h-full">
+                                        <div className={`px-4 py-2.5 rounded-t-xl font-medium border-b-2 flex justify-between items-center shrink-0 ${column.color}`}>
+                                            <span className="text-sm uppercase tracking-wider font-semibold">{column.title}</span>
+                                            <span className="bg-white/50 px-2 py-0.5 rounded-full text-xs font-bold">{colLeads.length}</span>
                                         </div>
-                                    )}
+                                        <div
+                                            className="flex-1 min-h-0 bg-slate-100/50 p-3 rounded-b-xl border border-t-0 border-slate-200 overflow-y-auto"
+                                            onDrop={(e) => handleDrop(e, column.id)}
+                                            onDragOver={handleDragOver}
+                                        >
+                                            {colLeads.map((lead: any, idx: number) => (
+                                                <LeadCard
+                                                    key={`${lead.id}-${idx}`}
+                                                    lead={lead}
+                                                    onDragStart={handleDragStart}
+                                                    onEdit={openEditModal}
+                                                    onDelete={handleDeleteLead}
+                                                    onCancel={openCancelModal}
+                                                    isHighlighted={highlightedLeadId === lead.id}
+                                                />
+                                            ))}
+
+                                            {colLeads.length === 0 && (
+                                                <div className="h-24 flex items-center justify-center text-sm font-medium text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+                                                    Drop leads here
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </VisibleScrollArea>
+                ) : (
+                    <div
+                        ref={scrollContainerRef}
+                        onMouseMove={handleMouseMoveOrDrag}
+                        onMouseLeave={stopScroll}
+                        onDragOver={(e) => {
+                            handleDragOver(e);
+                            handleMouseMoveOrDrag(e);
+                        }}
+                        onDragLeave={stopScroll}
+                        className="flex-1 min-h-0 flex gap-6 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                    >
+                        {visibleColumns.map(column => {
+                            const colLeads = leads.filter((l: any) => leadMatchesKanbanColumn(l, column.id, db));
+
+                            return (
+                                <div key={column.id} className="min-w-[320px] w-[320px] flex flex-col">
+                                    <div className={`px-4 py-2.5 rounded-t-xl font-medium border-b-2 flex justify-between items-center ${column.color}`}>
+                                        <span className="text-sm uppercase tracking-wider font-semibold">{column.title}</span>
+                                        <span className="bg-white/50 px-2 py-0.5 rounded-full text-xs font-bold">{colLeads.length}</span>
+                                    </div>
+                                    <div
+                                        className="flex-1 bg-slate-100/50 p-3 rounded-b-xl border border-t-0 border-slate-200 overflow-y-auto"
+                                        onDrop={(e) => handleDrop(e, column.id)}
+                                        onDragOver={handleDragOver}
+                                    >
+                                        {colLeads.map((lead: any, idx: number) => (
+                                            <LeadCard
+                                                key={`${lead.id}-${idx}`}
+                                                lead={lead}
+                                                onDragStart={handleDragStart}
+                                                onEdit={openEditModal}
+                                                onDelete={handleDeleteLead}
+                                                onCancel={openCancelModal}
+                                                isHighlighted={highlightedLeadId === lead.id}
+                                            />
+                                        ))}
+
+                                        {colLeads.length === 0 && (
+                                            <div className="h-24 flex items-center justify-center text-sm font-medium text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+                                                Drop leads here
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                            );
+                        })}
+                    </div>
+                )
             ) : (
                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col animate-in fade-in duration-300">
                     <div className="px-6 py-3 border-b border-slate-200 bg-slate-50/60 flex flex-wrap items-center gap-2 shrink-0">
@@ -1666,18 +2266,27 @@ const AgentLeadsView = () => {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4">
-                                                <div className="text-slate-700 font-medium flex items-center gap-2">
-                                                    <Calendar size={14} className="text-slate-400 shrink-0" />
-                                                    {formatLeadScheduleDate(lead)}
-                                                </div>
-                                                <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                                                    <User size={10} className="shrink-0" />
-                                                    {lead.travelers || 'Unknown'}
-                                                </div>
+                                            <td className="px-4 lg:px-6 py-4 min-w-[120px]">
+                                                {(() => {
+                                                    const { monthDay, year } = getLeadScheduleDateParts(lead);
+                                                    const dateLabel = year ? `${monthDay} ${year}` : monthDay;
+                                                    const travelersLabel = formatLeadTravelersSummary(lead.travelers);
+                                                    return (
+                                                        <>
+                                                            <div className="text-slate-700 font-medium flex items-center gap-2 whitespace-nowrap">
+                                                                <Calendar size={14} className="text-slate-400 shrink-0" />
+                                                                <span>{dateLabel}</span>
+                                                            </div>
+                                                            <div className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1.5 whitespace-nowrap">
+                                                                <User size={10} className="shrink-0" />
+                                                                <span>{travelersLabel}</span>
+                                                            </div>
+                                                        </>
+                                                    );
+                                                })()}
                                             </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className="font-bold text-green-700 px-2.5 py-1.5 bg-green-50 border border-green-100 rounded-lg shadow-sm">
+                                            <td className="px-4 lg:px-6 py-4 text-center whitespace-nowrap">
+                                                <span className="inline-block whitespace-nowrap font-bold text-green-700 dark:text-emerald-400 px-2.5 py-1.5 bg-green-50 dark:bg-emerald-950/40 border border-green-100 dark:border-emerald-800/50 rounded-lg shadow-sm">
                                                     {getLeadBudgetDisplay(lead)}
                                                 </span>
                                             </td>
@@ -1757,11 +2366,186 @@ const AgentLeadsView = () => {
 
                         <form onSubmit={handleSaveLead} className="p-8 overflow-y-auto flex-1 flex flex-col">
                             <div className="space-y-8">
-                                {/* Identity Section */}
-                                <div className="space-y-6">
+                                {/* Assignee first — then customer details */}
+                                <div className="space-y-4">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[2px] flex items-center gap-2 mb-2">
+                                        <Users size={14} className="text-indigo-500" />
+                                        {userRole === 'admin'
+                                            ? 'Assigned Agent / Sub-agent'
+                                            : userRole === 'staff'
+                                              ? 'Assigned Staff'
+                                              : 'Assign to Team Member'}
+                                    </label>
+
+                                    {userRole === 'staff' ? (
+                                        <div className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 shadow-sm">
+                                            {selectedLeadAssignee?.name || 'You (current staff)'}
+                                            {selectedLeadAssignee?.roleLabel ? (
+                                                <span className="ml-2 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                                    {selectedLeadAssignee.roleLabel}
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    ) : (
+                                        <div className="relative z-[70]">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    setIsAssigneeDropdownOpen((open) => {
+                                                        if (open) setAssigneeSearch('');
+                                                        return !open;
+                                                    });
+                                                }}
+                                                className={`w-full flex items-center justify-between gap-3 px-4 py-4 bg-slate-50 border rounded-2xl text-sm font-bold text-slate-800 outline-none transition-all shadow-sm ${
+                                                    isAssigneeDropdownOpen
+                                                        ? 'border-crm-500 bg-white ring-2 ring-crm-500/10'
+                                                        : 'border-slate-200 hover:border-crm-400'
+                                                }`}
+                                            >
+                                                <span className="truncate text-left">{selectedAssigneeOptionLabel}</span>
+                                                <DropdownChevron
+                                                    open={isAssigneeDropdownOpen}
+                                                    className="text-slate-400 shrink-0"
+                                                    size={16}
+                                                />
+                                            </button>
+
+                                            {isAssigneeDropdownOpen && (
+                                                <>
+                                                    <div
+                                                        className="fixed inset-0 z-[2500]"
+                                                        onClick={closeAssigneeDropdown}
+                                                    />
+                                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-[2600] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                                        <div className="p-2 border-b border-slate-100">
+                                                            <div className="relative">
+                                                                <Search
+                                                                    size={14}
+                                                                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    value={assigneeSearch}
+                                                                    onChange={(e) => setAssigneeSearch(e.target.value)}
+                                                                    placeholder={
+                                                                        userRole === 'admin'
+                                                                            ? 'Search agents by name, email, phone...'
+                                                                            : 'Search staff or sub-agents...'
+                                                                    }
+                                                                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-crm-500"
+                                                                    autoFocus
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="p-2 space-y-1 max-h-[280px] overflow-y-auto custom-scrollbar">
+                                                            {filteredLeadAssigneeOptions.length > 0 ? (
+                                                                filteredLeadAssigneeOptions.map((opt) => (
+                                                                    <button
+                                                                        key={`${opt.kind}-${opt.value || 'self'}`}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setFormAgentId(opt.value);
+                                                                            closeAssigneeDropdown();
+                                                                        }}
+                                                                        className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                                                                            formAgentId === opt.value
+                                                                                ? 'bg-crm-600 text-white shadow-sm'
+                                                                                : 'text-slate-700 hover:bg-slate-50'
+                                                                        }`}
+                                                                    >
+                                                                        <span className="block truncate">{opt.label}</span>
+                                                                    </button>
+                                                                ))
+                                                            ) : (
+                                                                <p className="px-3 py-4 text-center text-[11px] font-semibold text-slate-400">
+                                                                    No team members match your search
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {selectedLeadAssignee ? (
+                                        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            <div className="min-w-0">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 mb-1">
+                                                    Name
+                                                </div>
+                                                <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                                    <User size={14} className="text-indigo-400 shrink-0" />
+                                                    <span className="truncate">{selectedLeadAssignee.name}</span>
+                                                </div>
+                                                {selectedLeadAssignee.kind === 'staff' ? (
+                                                    selectedLeadAssignee.roleLabel ? (
+                                                        <div className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">
+                                                            {selectedLeadAssignee.roleLabel}
+                                                        </div>
+                                                    ) : null
+                                                ) : selectedLeadAssignee.businessName ? (
+                                                    <div className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">
+                                                        {selectedLeadAssignee.roleLabel}
+                                                        {` · ${selectedLeadAssignee.businessName}`}
+                                                    </div>
+                                                ) : selectedLeadAssignee.roleLabel ? (
+                                                    <div className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">
+                                                        {selectedLeadAssignee.roleLabel}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 mb-1">
+                                                    Email
+                                                </div>
+                                                <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                                    <Mail size={14} className="text-indigo-400 shrink-0" />
+                                                    {selectedLeadAssignee.email ? (
+                                                        <a
+                                                            href={`mailto:${selectedLeadAssignee.email}`}
+                                                            className="truncate hover:text-crm-600"
+                                                        >
+                                                            {selectedLeadAssignee.email}
+                                                        </a>
+                                                    ) : (
+                                                        <span className="text-slate-400">No email found</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 mb-1">
+                                                    Mobile
+                                                </div>
+                                                <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                                    <Phone size={14} className="text-indigo-400 shrink-0" />
+                                                    {selectedLeadAssignee.phone ? (
+                                                        <a
+                                                            href={`tel:${String(selectedLeadAssignee.phone).replace(/\s+/g, '')}`}
+                                                            className="truncate hover:text-crm-600"
+                                                        >
+                                                            {selectedLeadAssignee.phone}
+                                                        </a>
+                                                    ) : (
+                                                        <span className="text-slate-400">No mobile number found</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : userRole === 'admin' && !formAgentId ? (
+                                        <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-semibold text-slate-500">
+                                            No agent selected — this will be saved as a direct / unassigned lead.
+                                        </div>
+                                    ) : null}
+                                </div>
+
+                                {/* Customer details */}
+                                <div className="space-y-6 pt-2 border-t border-slate-100">
                                     <div className="space-y-4">
                                         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[2px] flex items-center gap-2 mb-2">
-                                            <User size={14} className="text-crm-500" /> Primary Lead Identity
+                                            <User size={14} className="text-crm-500" /> Customer Details
                                         </label>
                                         <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                                             <div className="md:col-span-12 relative group">
@@ -1900,55 +2684,18 @@ const AgentLeadsView = () => {
                                         </div>
                                     )}
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2 items-end">
-                                        {userRole !== 'staff' && (
-                                            <div className="space-y-3">
-                                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[2px] flex items-center gap-2 mb-2">
-                                                    <Users size={14} className="text-indigo-500" />
-                                                    {userRole === 'admin' ? 'Assigned Agent/Sub-agent' : 'Assign to Team Member'}
-                                                </label>
-                                                <div className="relative group crm-select-wrap">
-                                                    <select
-                                                        value={formAgentId}
-                                                        onChange={e => setFormAgentId(e.target.value)}
-                                                        className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 focus:border-crm-500 outline-none appearance-none cursor-pointer transition-all shadow-sm"
-                                                    >
-                                                        <option value="">{userRole === 'admin' ? 'Direct Lead (No Agent)' : 'Me (Direct Handling)'}</option>
-                                                        {userRole === 'admin' ? (
-                                                            (db.travelAgents?.data || []).map((agent: any) => (
-                                                                <option key={agent.id} value={agent.id}>{agent.name} — {agent.businessName}</option>
-                                                            ))
-                                                        ) : (
-                                                            <>
-                                                                {filterStaffForAgentSession(db.staff?.data || [], currentAgentId, db).map((member: any) => (
-                                                                    <option key={member.id} value={member.employeeId}>Staff: {member.name} ({member.role})</option>
-                                                                ))}
-                                                                {(db.travelAgents?.data || []).filter((a: any) => a.parentId === currentAgentId).map((subAgent: any) => (
-                                                                    <option key={subAgent.id} value={subAgent.id}>Sub-agent: {subAgent.name} — {subAgent.businessName}</option>
-                                                                ))}
-                                                            </>
-                                                        )}
-                                                    </select>
-                                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                                        <DropdownChevron size={16} />
-                                                    </div>
-                                                </div>
+                                    <div className="space-y-3">
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[2px] flex items-center gap-2 mb-2">
+                                            <PlusSquare size={14} className="text-emerald-500" /> Traveler Configuration
+                                        </label>
+                                        <div className="flex gap-4 max-w-md">
+                                            <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-200 items-center justify-between flex hover:border-crm-300 transition-all group h-[58px] shadow-sm">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[1px] group-hover:text-crm-500">Adults</span>
+                                                <NumberInput name="adults" min="1" value={formAdults} onChange={e => setFormAdults(parseInt(e.target.value) || 1)} className="w-10 bg-transparent border-none text-right font-black text-slate-800 p-0 focus:ring-0" />
                                             </div>
-                                        )}
-
-                                        <div className="space-y-3">
-                                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[2px] flex items-center gap-2 mb-2">
-                                                <PlusSquare size={14} className="text-emerald-500" /> Traveler Configuration
-                                            </label>
-                                            <div className="flex gap-4">
-                                                <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-200 items-center justify-between flex hover:border-crm-300 transition-all group h-[58px] shadow-sm">
-                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[1px] group-hover:text-crm-500">Adults</span>
-                                                    <input type="number" name="adults" min="1" value={formAdults} onChange={e => setFormAdults(parseInt(e.target.value) || 1)} className="w-10 bg-transparent border-none text-right font-black text-slate-800 p-0 focus:ring-0" />
-                                                </div>
-                                                <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-200 items-center justify-between flex hover:border-crm-300 transition-all group h-[58px] shadow-sm">
-                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[1px] group-hover:text-crm-500">Kids</span>
-                                                    <input type="number" name="kids" min="0" value={formKids} onChange={e => setFormKids(parseInt(e.target.value) || 0)} className="w-10 bg-transparent border-none text-right font-black text-slate-800 p-0 focus:ring-0" />
-                                                </div>
+                                            <div className="flex-1 bg-slate-50 p-4 rounded-2xl border border-slate-200 items-center justify-between flex hover:border-crm-300 transition-all group h-[58px] shadow-sm">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[1px] group-hover:text-crm-500">Kids</span>
+                                                <NumberInput name="kids" min="0" value={formKids} onChange={e => setFormKids(parseInt(e.target.value) || 0)} className="w-10 bg-transparent border-none text-right font-black text-slate-800 p-0 focus:ring-0" />
                                             </div>
                                         </div>
                                     </div>
@@ -1967,7 +2714,10 @@ const AgentLeadsView = () => {
                                                     onClick={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
-                                                        setIsDestinationDropdownOpen((open) => !open);
+                                                        setIsDestinationDropdownOpen((open) => {
+                                                            if (open) setDestinationCountrySearch('');
+                                                            return !open;
+                                                        });
                                                     }}
                                                     className="w-full flex items-center justify-between gap-3 pl-4 pr-4 py-[15px] bg-white border border-slate-200 rounded-[22px] text-xs font-bold text-slate-700 hover:border-crm-400 focus:border-crm-500 outline-none transition-all shadow-sm"
                                                 >
@@ -1979,7 +2729,9 @@ const AgentLeadsView = () => {
                                                         />
                                                         <span className="truncate">
                                                             {selectedDestination
-                                                                ? `${selectedDestination.country} (${selectedDestination.name})`
+                                                                ? selectedDestination.name !== selectedDestination.country
+                                                                    ? `${selectedDestination.country} (${selectedDestination.name})`
+                                                                    : selectedDestination.country
                                                                 : 'Select Destination Hub'}
                                                         </span>
                                                     </div>
@@ -1994,34 +2746,53 @@ const AgentLeadsView = () => {
                                                     <>
                                                         <div
                                                             className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]"
-                                                            onClick={() => setIsDestinationDropdownOpen(false)}
+                                                            onClick={() => {
+                                                                setIsDestinationDropdownOpen(false);
+                                                                setDestinationCountrySearch('');
+                                                            }}
                                                         />
                                                         <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                                            <div className="p-2 space-y-1 max-h-[380px] overflow-y-auto custom-scrollbar">
-                                                                {activeDestinations.map((dest) => (
-                                                                    <button
-                                                                        key={dest.id + dest.country}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setFormPresetId(dest.id);
-                                                                            setFormDestinationCountry(dest.destination);
-                                                                            setIsDestinationDropdownOpen(false);
-                                                                        }}
-                                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
-                                                                            formPresetId === dest.id
-                                                                                ? 'bg-crm-50 text-crm-700'
-                                                                                : 'hover:bg-slate-50 text-slate-600'
-                                                                        }`}
-                                                                    >
-                                                                        <CountryFlag country={dest.country} size={22} />
-                                                                        <div className="text-left min-w-0">
-                                                                            <p className="text-[11px] font-black uppercase tracking-tight truncate">
-                                                                                {dest.country}
-                                                                            </p>
-                                                                            <p className="text-[10px] opacity-70 truncate">{dest.name}</p>
-                                                                        </div>
-                                                                    </button>
-                                                                ))}
+                                                            <div className="p-2 border-b border-slate-100">
+                                                                <div className="relative">
+                                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                                    <input
+                                                                        type="text"
+                                                                        value={destinationCountrySearch}
+                                                                        onChange={(e) => setDestinationCountrySearch(e.target.value)}
+                                                                        placeholder="Search countries..."
+                                                                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-crm-500"
+                                                                        autoFocus
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                            <div className="p-2 max-h-[320px] overflow-y-auto custom-scrollbar">
+                                                                <CountryGroupedItemList
+                                                                    items={filteredDestinations}
+                                                                    getCountry={(dest) => dest.country}
+                                                                    getKey={(dest) => dest.id + dest.country}
+                                                                    selectedCountry={selectedDestination?.country}
+                                                                    onSelect={(dest) => {
+                                                                        setFormPresetId(dest.id);
+                                                                        setFormDestinationCountry(dest.destination);
+                                                                        setIsDestinationDropdownOpen(false);
+                                                                        setDestinationCountrySearch('');
+                                                                    }}
+                                                                    renderItem={(dest) => (
+                                                                        <>
+                                                                            <CountryFlag country={dest.country} size={22} />
+                                                                            <div className="text-left min-w-0">
+                                                                                <p className="text-[11px] font-black uppercase tracking-tight truncate">
+                                                                                    {dest.country}
+                                                                                </p>
+                                                                                {dest.name !== dest.country && (
+                                                                                    <p className="text-[10px] opacity-70 truncate">
+                                                                                        {dest.name}
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                />
                                                             </div>
                                                         </div>
                                                     </>

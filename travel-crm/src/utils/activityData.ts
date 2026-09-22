@@ -4,6 +4,7 @@ export interface Activity {
     description: string;
     price: number;
     country: string;
+    location?: string;
     city?: string;
     category: 'Adventure' | 'Culture' | 'Leisure' | 'Dining' | 'Modern' | 'Nature';
 }

@@ -21,6 +21,10 @@ type HotelStayReview = {
     personsPerRoom?: number;
     extraBed?: number;
     extraBedPrice?: number;
+    childWithBed?: number;
+    childWithBedPrice?: number;
+    childWithoutBed?: number;
+    childWithoutBedPrice?: number;
     mealPlan?: string;
     nightPrices?: HotelNightPrice[];
     hotelBookingId?: string;
@@ -50,6 +54,8 @@ type Props = {
     getStayDateLabel: (idx: number) => string;
     getHotelName: (hotelId: string) => string;
     itinerary: any[];
+    transportation?: string;
+    vehiclePrice?: number;
     hotelMealPlan: string;
     needFlight?: boolean;
     flightMeal?: { optIn: boolean; type: 'Veg' | 'Non-Veg' | 'Vegan' };
@@ -128,6 +134,8 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
     getStayDateLabel,
     getHotelName,
     itinerary,
+    transportation,
+    vehiclePrice,
     hotelMealPlan,
     needFlight = true,
     flightMeal,
@@ -267,6 +275,18 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
                                                 value={`${stay.extraBed} @ ${formatInr(stay.extraBedPrice || 0)}/night`}
                                             />
                                         )}
+                                        {(stay.childWithBed || 0) > 0 && (
+                                            <Detail
+                                                label="Child with bed"
+                                                value={`${stay.childWithBed} @ ${formatInr(stay.childWithBedPrice || 0)}/night`}
+                                            />
+                                        )}
+                                        {(stay.childWithoutBed || 0) > 0 && (
+                                            <Detail
+                                                label="Child without bed"
+                                                value={`${stay.childWithoutBed} @ ${formatInr(stay.childWithoutBedPrice || 0)}/night`}
+                                            />
+                                        )}
                                     </div>
                                     {stay.hotelBookingId && hotelSelectionConfirmed && (
                                         <p className="text-[10px] font-mono text-slate-500 mt-2">
@@ -310,6 +330,21 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
             </ReviewSection>
 
             <ReviewSection title="Itinerary" icon={<MapPin size={16} />} step="itinerary" onEditStep={onEditStep}>
+                {(transportation || (vehiclePrice != null && vehiclePrice > 0)) ? (
+                    <p className="text-xs font-semibold text-slate-600 mb-3">
+                        {transportation ? (
+                            <>
+                                Travel vehicle: <span className="text-crm-700 font-black">{transportation}</span>
+                            </>
+                        ) : null}
+                        {vehiclePrice != null && vehiclePrice > 0 ? (
+                            <span className={transportation ? ' ml-1' : ''}>
+                                {transportation ? '· ' : ''}
+                                {formatInr(vehiclePrice)}
+                            </span>
+                        ) : null}
+                    </p>
+                ) : null}
                 {itinerary.length === 0 ? (
                     <p className="text-sm text-slate-400 italic">No itinerary days yet.</p>
                 ) : (

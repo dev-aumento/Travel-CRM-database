@@ -267,6 +267,10 @@ export interface PricingInput {
         rooms?: number;
         extraBed?: number;
         extraBedPrice?: number;
+        childWithBed?: number;
+        childWithBedPrice?: number;
+        childWithoutBed?: number;
+        childWithoutBedPrice?: number;
         nightPrices?: Array<{ rate?: number; given?: number }>;
     }>;
     hotelMealPlan?: string;
@@ -305,6 +309,8 @@ import {
     getHotelTierMultiplier,
     sumStayGivenTotal,
     sumStayExtraBedTotal,
+    sumStayChildWithBedTotal,
+    sumStayChildWithoutBedTotal,
     sumStaySpecialInclusionsTotal,
 } from './hotelStayPricing';
 
@@ -413,6 +419,10 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
                 rooms?: number;
                 extraBed?: number;
                 extraBedPrice?: number;
+                childWithBed?: number;
+                childWithBedPrice?: number;
+                childWithoutBed?: number;
+                childWithoutBedPrice?: number;
                 nightPrices?: Array<{ rate?: number; given?: number }>;
             }> = [];
             let used = 0;
@@ -427,6 +437,10 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
                         rooms: stay.rooms,
                         extraBed: stay.extraBed,
                         extraBedPrice: stay.extraBedPrice,
+                        childWithBed: stay.childWithBed,
+                        childWithBedPrice: stay.childWithBedPrice,
+                        childWithoutBed: stay.childWithoutBed,
+                        childWithoutBedPrice: stay.childWithoutBedPrice,
                         nightPrices: stay.nightPrices,
                     });
                     used += stayNights;
@@ -444,7 +458,12 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
 
     const sumStayExtras = (stay: (typeof normalizedHotelStays)[number]) => {
         if (sumStayGivenTotal(stay as any) <= 0) return 0;
-        return sumStayExtraBedTotal(stay as any) + sumStaySpecialInclusionsTotal(stay as any);
+        return (
+            sumStayExtraBedTotal(stay as any) +
+            sumStayChildWithBedTotal(stay as any) +
+            sumStayChildWithoutBedTotal(stay as any) +
+            sumStaySpecialInclusionsTotal(stay as any)
+        );
     };
 
     let hotelAccommodationTotal = 0;

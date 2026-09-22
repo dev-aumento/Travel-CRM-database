@@ -178,8 +178,8 @@ const initialDB = {
         name: 'Subscription Plans',
         columns: ['ID', 'Name', 'Tagline', 'Price', 'Period', 'Staff Limit', 'Sub-Agent Limit', 'Features'],
         data: [
-            { id: 'PLAN-001', name: 'Lite', tagline: 'Perfect for solo agents and small startups', price: '₹0', period: '/forever', staffLimit: 5, subAgentLimit: 9999, features: 'Full Lead Management,Quotation Builder (Basic),Personal Agency Profile,Basic Finance Tracking,Standard Email Support' },
-            { id: 'PLAN-002', name: 'Growth', tagline: 'Best for rising teams and growing agencies', price: '₹1,999', period: '/month', staffLimit: 25, subAgentLimit: 9999, features: 'Everything in Lite,Advanced Finance Reporting,Custom Package Presets,Whitelabel Lead PDF,Priority WhatsApp Support,Team Management Dashboard' },
+            { id: 'PLAN-001', name: 'Lite', tagline: 'Perfect for solo agents and small startups', price: '₹0', period: '/forever', staffLimit: 9999, subAgentLimit: 9999, features: 'Full Lead Management,Quotation Builder (Basic),Personal Agency Profile,Basic Finance Tracking,Standard Email Support' },
+            { id: 'PLAN-002', name: 'Growth', tagline: 'Best for rising teams and growing agencies', price: '₹1,999', period: '/month', staffLimit: 9999, subAgentLimit: 9999, features: 'Everything in Lite,Advanced Finance Reporting,Custom Package Presets,Whitelabel Lead PDF,Priority WhatsApp Support,Team Management Dashboard' },
             { id: 'PLAN-003', name: 'Enterprise', tagline: 'Scale your business with zero limits', price: '₹4,999', period: '/month', staffLimit: 9999, subAgentLimit: 9999, features: 'Everything in Growth,Multi-Office Management,Dedicated Account Manager,Custom Domain Integration,API Access for Websites,Advanced Security Controls' },
         ]
     },

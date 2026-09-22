@@ -1,4 +1,5 @@
 import React from 'react';
+import NumberInput from './NumberInput';
 import { Plus, Trash2 } from 'lucide-react';
 import { useCurrency } from '../hooks/useCurrency';
 
@@ -73,8 +74,7 @@ const HotelSpecialInclusionsSection: React.FC<Props> = ({
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
                                     {currencySymbol}
                                 </span>
-                                <input
-                                    type="number"
+                                <NumberInput
                                     min={0}
                                     step={priceInputStep}
                                     value={formatInputValue(row.amount || 0)}

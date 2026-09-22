@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-all.mjs",
+    "dev:web": "vite",
     "server": "node server/index.js",
     "dev:server": "nodemon server/index.js",
     "seed": "npx vite-node server/scripts/seed.ts",

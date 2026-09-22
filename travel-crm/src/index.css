@@ -17,6 +17,18 @@
   option {
     cursor: pointer;
   }
+
+  /* Hide native number spinners everywhere in the CRM */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
 }
 
 @layer components {
@@ -43,25 +55,88 @@
 
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: theme('colors.slate.200') transparent;
+    scrollbar-color: theme('colors.slate.300') theme('colors.slate.100');
   }
 
   .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
+    -webkit-appearance: none;
+    width: 8px;
+    height: 8px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
+    background: theme('colors.slate.100');
+    border-radius: 9999px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: theme('colors.slate.200');
-    border-radius: 20px;
-    border: 2px solid transparent;
+    background-color: theme('colors.slate.300');
+    border-radius: 9999px;
+    border: 2px solid theme('colors.slate.100');
+    background-clip: padding-box;
   }
 
   .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-    background-color: theme('colors.slate.300');
+    background-color: theme('colors.slate.400');
+  }
+
+  /* Tables: always-visible horizontal/vertical scrollbars (Safari + desktop) */
+  .table-scroll {
+    -webkit-overflow-scrolling: touch;
+    overflow: auto;
+    scrollbar-width: auto;
+    scrollbar-color: #94a3b8 #e2e8f0;
+    /* Edge fades show more content exists when native iOS bars are hidden */
+    background:
+      linear-gradient(90deg, #ffffff 30%, rgba(255, 255, 255, 0)),
+      linear-gradient(90deg, rgba(255, 255, 255, 0), #ffffff 70%) 100% 0,
+      radial-gradient(farthest-side at 0% 50%, rgba(15, 23, 42, 0.16), rgba(0, 0, 0, 0)),
+      radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.16), rgba(0, 0, 0, 0)) 100% 0;
+    background-color: #ffffff;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+    background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  }
+
+  .table-scroll::-webkit-scrollbar {
+    -webkit-appearance: none;
+    width: 10px;
+    height: 10px;
+  }
+
+  .table-scroll::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 9999px;
+  }
+
+  .table-scroll::-webkit-scrollbar-thumb {
+    background-color: #94a3b8;
+    border-radius: 9999px;
+    border: 2px solid #e2e8f0;
+    background-clip: padding-box;
+    min-height: 36px;
+  }
+
+  .table-scroll::-webkit-scrollbar-thumb:active,
+  .table-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+  }
+
+  .table-scroll::-webkit-scrollbar-corner {
+    background: #e2e8f0;
+  }
+
+  /* Hide native bars inside VisibleScrollArea — custom thumbs are painted instead (Safari/iOS) */
+  .visible-scroll-viewport {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .visible-scroll-viewport::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
   }
 
   .custom-select {
@@ -174,6 +249,65 @@
 
 .dark :where(.bg-white) {
   background-color: rgb(30 41 59);
+}
+
+/* Quote document keeps a continuous white surface that grows with ALL content */
+.quote-print-document,
+#printable-quote {
+  background-color: #ffffff !important;
+  display: block !important;
+  height: fit-content !important;
+  min-height: 297mm;
+  max-height: none !important;
+  overflow: visible !important;
+  flex-shrink: 0 !important;
+}
+
+.quote-print-scroll {
+  display: block !important;
+}
+
+.quote-print-body {
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.dark .quote-print-document,
+.dark #printable-quote {
+  background-color: #ffffff !important;
+}
+
+.dark .quote-print-document :where(.bg-white) {
+  background-color: #ffffff !important;
+}
+
+.dark .quote-print-document :where(.bg-slate-50, .bg-gray-50) {
+  background-color: #f8fafc !important;
+}
+
+.dark .quote-print-document :where(.text-slate-900) {
+  color: #0f172a !important;
+}
+
+.dark .quote-print-document :where(.text-slate-800) {
+  color: #1e293b !important;
+}
+
+.dark .quote-print-document :where(.text-slate-700) {
+  color: #334155 !important;
+}
+
+.dark .quote-print-document :where(.text-slate-500),
+.dark .quote-print-document :where(.text-slate-400) {
+  color: #64748b !important;
+}
+
+.dark .quote-print-document :where(.border-slate-100),
+.dark .quote-print-document :where(.border-slate-200) {
+  border-color: #e2e8f0 !important;
 }
 
 .dark :where(.bg-white\/80) {
@@ -465,15 +599,51 @@ select.booking-status-select option {
 }
 
 .dark .custom-scrollbar {
-  scrollbar-color: rgb(71 85 105) transparent;
+  scrollbar-color: rgb(100 116 139) rgb(30 41 59);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgb(30 41 59);
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgb(71 85 105);
+  background-color: rgb(100 116 139);
+  border-color: rgb(30 41 59);
 }
 
 .dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184);
+}
+
+.dark .table-scroll {
+  scrollbar-color: rgb(100 116 139) rgb(30 41 59);
+  background:
+    linear-gradient(90deg, rgb(15 23 42) 30%, rgba(15, 23, 42, 0)),
+    linear-gradient(90deg, rgba(15, 23, 42, 0), rgb(15 23 42) 70%) 100% 0,
+    radial-gradient(farthest-side at 0% 50%, rgba(148, 163, 184, 0.35), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 100% 50%, rgba(148, 163, 184, 0.35), rgba(0, 0, 0, 0)) 100% 0;
+  background-color: rgb(15 23 42);
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+}
+
+.dark .table-scroll::-webkit-scrollbar-track {
+  background: rgb(30 41 59);
+}
+
+.dark .table-scroll::-webkit-scrollbar-thumb {
   background-color: rgb(100 116 139);
+  border-color: rgb(30 41 59);
+}
+
+.dark .table-scroll::-webkit-scrollbar-thumb:active,
+.dark .table-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184);
+}
+
+.dark .table-scroll::-webkit-scrollbar-corner {
+  background: rgb(30 41 59);
 }
 
 .dark ::-webkit-scrollbar-thumb {
@@ -619,6 +789,9 @@ select.booking-status-select option {
 
   #printable-quote .quote-print-body {
     padding: 18mm 0 14mm 0 !important;
+    flex: none !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
 
   #printable-quote .quote-print-running-header {
@@ -711,7 +884,8 @@ select.booking-status-select option {
     gap: 8px !important;
   }
 
-  .print-break-avoid {
+  .print-break-avoid,
+  .pdf-break-avoid {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }

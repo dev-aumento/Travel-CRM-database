@@ -106,7 +106,7 @@ const Plans = () => {
         color: p.name === 'Lite' ? 'blue' : p.name === 'Growth' ? 'crm' : 'amber',
         popular: p.name === 'Growth',
         limits: {
-            staff: p.staffLimit >= 9999 ? 'Unlimited' : p.staffLimit,
+            staff: 'Unlimited',
             subAgents: 'Unlimited',
             quotations: 'Unlimited'
         },

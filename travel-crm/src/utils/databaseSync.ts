@@ -414,20 +414,47 @@ export const findLeadForBooking = (booking: any, leads: any[]): any | undefined 
 export const isConfirmedLead = (lead: any): boolean =>
     CONFIRMED_LEAD_STATUSES.has(String(lead?.status || '').toLowerCase());
 
+/** Booking status dropdown — same values/labels as the Leads pipeline panels. */
+export const BOOKING_PIPELINE_STATUS_OPTIONS = [
+    { value: 'new', label: 'New Leads' },
+    { value: 'contacted', label: 'Contacted' },
+    { value: 'itinerary', label: 'Itinerary Sent' },
+    { value: 'negotiation', label: 'In Discussion' },
+    { value: 'confirmed', label: 'Booking Confirmed' },
+    { value: 'completed', label: 'Trip Completed' },
+    { value: 'canceled', label: 'Canceled' },
+] as const;
+
+/** Map legacy/alias statuses onto the leads pipeline column ids. */
+export const normalizePipelineStatus = (status?: string): string => {
+    const s = String(status || '').toLowerCase();
+    if (!s || s === 'pending') return 'itinerary';
+    if (s === 'cancelled') return 'canceled';
+    return s;
+};
+
+export const getPipelineStatusLabel = (status?: string): string => {
+    const normalized = normalizePipelineStatus(status);
+    return (
+        BOOKING_PIPELINE_STATUS_OPTIONS.find((option) => option.value === normalized)?.label ||
+        normalized
+    );
+};
+
 /** Booking row status aligned with lead pipeline (confirmed leads → booking confirmed). */
 export const getBookingPipelineStatus = (lead: any): string => {
-    const status = String(lead?.status || '').toLowerCase();
+    const status = normalizePipelineStatus(lead?.status);
     if (status === 'completed') return 'completed';
+    if (status === 'canceled') return 'canceled';
     if (CONFIRMED_LEAD_STATUSES.has(status)) return 'confirmed';
-    if (status === 'cancelled' || status === 'canceled') return 'cancelled';
-    return status || 'pending';
+    return status;
 };
 
 export const getBookingDisplayStatus = (booking: any, lead?: any): string => {
     if (lead && isConfirmedLead(lead)) {
         return getBookingPipelineStatus(lead);
     }
-    return String(booking?.status || 'pending');
+    return normalizePipelineStatus(booking?.status || 'confirmed');
 };
 
 /** True when a booking row is backed by at least one quotation (direct quoteId or linked lead). */
@@ -1195,57 +1222,26 @@ export const countAgencySubAgents = (
     ).length;
 };
 
-const DEFAULT_PLAN_SLOT_LIMITS: Record<string, { staff: number; subAgents: number }> = {
-    Lite: { staff: 5, subAgents: 9999 },
-    Growth: { staff: 25, subAgents: 9999 },
-    Enterprise: { staff: 9999, subAgents: 9999 },
-};
-
-const parsePlanSlotLimit = (value: unknown, fallback: number): number => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
-};
-
-export const isUnlimitedPlanSlots = (limit: number): boolean => limit >= 9999;
-
-/** Resolve staff slot limits for the billing main agency. Sub-agents are always unlimited. */
+/** Staff and sub-agent slots are always unlimited. */
 export const getAgencyPlanLimits = (
     db: any,
     sessionAgentId: string | null | undefined
 ): { planName: string; staff: number; subAgents: number } => {
     const mainAgent = resolveMainAgencyAgent(db, { sessionAgentId: sessionAgentId || '' });
     const planName = mainAgent?.plan || 'Lite';
-    const defaults = DEFAULT_PLAN_SLOT_LIMITS[planName] || DEFAULT_PLAN_SLOT_LIMITS.Lite;
-    const planMeta = (db?.plans?.data || []).find((p: any) => p.name === planName);
-
-    if (!planMeta) {
-        return { planName, staff: defaults.staff, subAgents: 9999 };
-    }
 
     return {
         planName,
-        staff: parsePlanSlotLimit(planMeta.staffLimit, defaults.staff),
+        staff: 9999,
         subAgents: 9999,
     };
 };
 
+/** Staff slots are unlimited (same as sub-agents). */
 export const canAddAgencyStaff = (
-    db: any,
-    sessionAgentId: string | null | undefined
-): { allowed: boolean; message?: string } => {
-    const limits = getAgencyPlanLimits(db, sessionAgentId);
-    if (isUnlimitedPlanSlots(limits.staff)) return { allowed: true };
-
-    const count = countAgencyStaff(db, sessionAgentId);
-    if (count >= limits.staff) {
-        return {
-            allowed: false,
-            message: `Plan limit reached: your ${limits.planName} plan allows a maximum of ${limits.staff} staff members across your agency (including sub-agent teams). Please upgrade your plan.`,
-        };
-    }
-    return { allowed: true };
-};
+    _db: any,
+    _sessionAgentId: string | null | undefined
+): { allowed: boolean; message?: string } => ({ allowed: true });
 
 export const canAddAgencySubAgent = (
     _db: any,
@@ -1865,7 +1861,7 @@ export const buildLeadCancellationPatch = (payload: TripCancellationPayload) => 
 });
 
 export const buildBookingCancellationPatch = (payload: TripCancellationPayload) => ({
-    status: 'cancelled',
+    status: 'canceled',
     ...buildTripCancellationMeta(payload),
 });
 

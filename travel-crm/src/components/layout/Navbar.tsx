@@ -220,7 +220,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
             <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
                 <button 
                     onClick={onToggleSidebar}
-                    className="lg:hidden p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                    className="xl:hidden p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
                 >
                     <Menu size={20} />
                 </button>

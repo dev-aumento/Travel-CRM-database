@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import NumberInput from '../components/NumberInput';
 import {
     DollarSign,
     TrendingUp,
@@ -19,6 +20,7 @@ import {
     X
 } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
+import VisibleScrollArea from '../components/VisibleScrollArea';
 import {
     getBookingPaymentDetails,
     getUnifiedBudgetForBooking,
@@ -35,6 +37,8 @@ import { useCurrency } from '../hooks/useCurrency';
 import { getAgentIdsForScope } from '../utils/databaseSync';
 import { PLATFORM_NAME } from '../constants/platform';
 import DropdownChevron from '../components/DropdownChevron';
+import AgencyBankDetailsBlock from '../components/AgencyBankDetailsBlock';
+import { resolveAgencyBankDetails } from '../utils/agencyBankDetails';
 
 type InvoiceRow = { booking: any; payment: BookingPaymentDetails };
 
@@ -52,6 +56,10 @@ const Finance = () => {
 
     const agencyBranding = useAgencyBranding();
     const agencyName = agencyBranding.name;
+    const agencyBankDetails = useMemo(
+        () => resolveAgencyBankDetails(agencyBranding.settings),
+        [agencyBranding.settings]
+    );
 
     // Resolve the active agency details for the selected invoice
     const invoiceBranding = useMemo(() => {
@@ -252,132 +260,132 @@ const Finance = () => {
     const formatCurrency = (amount: number) => formatMoney(amount);
 
     return (
-        <div className="h-full flex flex-col gap-6 overflow-hidden font-sans pb-8 min-h-0">
+        <div className="h-full flex flex-col gap-3 sm:gap-4 overflow-hidden font-sans min-h-0">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-                <div>
-                    <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                        <DollarSign className="text-crm-600" size={28} />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 shrink-0">
+                <div className="min-w-0">
+                    <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                        <DollarSign className="text-crm-600 shrink-0" size={20} />
                         Financial Control Center
                     </h1>
-                    <p className="text-slate-500 text-sm font-medium">
+                    <p className="text-slate-500 text-xs font-medium mt-0.5">
                         Manage revenue, invoices, and payment settlements
                     </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
                         onClick={() => setShowSalesReport(true)}
-                        className="btn-secondary flex items-center gap-2 py-3"
+                        className="flex items-center gap-1.5 py-2 px-3 sm:px-4 text-[10px] sm:text-xs font-bold uppercase tracking-widest whitespace-nowrap rounded-xl text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 shadow-sm transition-all active:scale-95"
                     >
-                        <Download size={18} /> Export Sales Report
+                        <Download size={14} /> Export Sales Report
                     </button>
                 </div>
             </div>
 
-            {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-[1440px]:gap-6 shrink-0">
-                <div className="bg-white p-4 min-[1440px]:p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
-                        <TrendingUp size={64} className="text-crm-600" />
+            {/* Metrics Grid — compact so the invoice table gets more room */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 shrink-0">
+                <div className="bg-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-1 right-1 opacity-10 pointer-events-none">
+                        <TrendingUp size={28} className="text-crm-600" />
                     </div>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Total Gross Volume</p>
-                    <h3 className="text-xl lg:text-2xl min-[1440px]:text-3xl font-black text-slate-900">{formatCurrency(metrics.totalRevenue)}</h3>
-                    <div className="mt-4 flex items-center gap-1.5 text-emerald-600 font-bold text-xs bg-emerald-50 w-fit px-2 py-1 rounded-full">
-                        <ArrowUpRight size={14} /> +{metrics.growth}% from last month
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Gross Volume</p>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">{formatCurrency(metrics.totalRevenue)}</h3>
+                    <div className="mt-1.5 flex items-center gap-1 text-emerald-600 font-bold text-[10px] bg-emerald-50 w-fit px-1.5 py-0.5 rounded-full">
+                        <ArrowUpRight size={11} /> +{metrics.growth}% from last month
                     </div>
                 </div>
 
-                <div className="bg-white p-4 min-[1440px]:p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
-                        <CheckCircle2 size={64} className="text-emerald-600" />
+                <div className="bg-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-1 right-1 opacity-10 pointer-events-none">
+                        <CheckCircle2 size={28} className="text-emerald-600" />
                     </div>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Total Collected</p>
-                    <h3 className="text-xl lg:text-2xl min-[1440px]:text-3xl font-black text-slate-900">{formatCurrency(metrics.collectedAmount)}</h3>
-                    <div className="mt-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Collected</p>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">{formatCurrency(metrics.collectedAmount)}</h3>
+                    <div className="mt-1.5 text-slate-400 text-[9px] font-bold uppercase tracking-widest">
                         {((metrics.collectedAmount / metrics.totalRevenue) * 100 || 0).toFixed(1)}% Settlement Rate
                     </div>
                 </div>
 
-                <div className="bg-white p-4 min-[1440px]:p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
-                        <AlertCircle size={64} className="text-amber-600" />
+                <div className="bg-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-1 right-1 opacity-10 pointer-events-none">
+                        <AlertCircle size={28} className="text-amber-600" />
                     </div>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Pending Balance</p>
-                    <h3 className="text-xl lg:text-2xl min-[1440px]:text-3xl font-black text-amber-600">{formatCurrency(metrics.pendingAmount)}</h3>
-                    <div className="mt-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Pending Balance</p>
+                    <h3 className="text-sm sm:text-base font-black text-amber-600 leading-tight">{formatCurrency(metrics.pendingAmount)}</h3>
+                    <div className="mt-1.5 text-slate-400 text-[9px] font-bold uppercase tracking-widest">
                         Awaiting from {invoiceRows.filter((row: InvoiceRow) => row.payment.status !== 'paid').length} clients
                     </div>
                 </div>
 
-                <div className="bg-white p-4 min-[1440px]:p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:shadow-xl transition-all duration-500 border-l-4 border-l-crm-500">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
-                        <FileText size={64} className="text-crm-600" />
+                <div className="bg-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden border-l-4 border-l-crm-500">
+                    <div className="absolute top-1 right-1 opacity-10 pointer-events-none">
+                        <FileText size={28} className="text-crm-600" />
                     </div>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Active Invoices</p>
-                    <h3 className="text-xl lg:text-2xl min-[1440px]:text-3xl font-black text-slate-900">{invoiceRows.length}</h3>
-                    <div className="mt-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Active Invoices</p>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">{invoiceRows.length}</h3>
+                    <div className="mt-1.5 text-slate-400 text-[9px] font-bold uppercase tracking-widest">
                         {metrics.confirmedCount} Fully Confirmed
                     </div>
                 </div>
             </div>
 
             {/* Main Section */}
-            <div className="flex-1 min-h-0 flex flex-col gap-6">
-                <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden">
-                    <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {/* Toolbar */}
-                        <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between">
-                            <div className="relative w-full max-w-md">
-                                <Search className="absolute left-4 top-3 text-slate-400" size={18} />
-                                <input
-                                    type="text"
-                                    placeholder="Search by customer or invoice #"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-sm focus:outline-none focus:border-crm-500 font-medium"
-                                />
-                            </div>
-                            <div className="flex items-center gap-2 self-end">
-                                <div className="flex bg-slate-100 p-1 rounded-xl">
+            <div className="flex-1 min-h-0 flex flex-col">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden">
+                    {/* Toolbar */}
+                    <div className="px-3 py-2.5 sm:px-4 sm:py-3 border-b border-slate-100 flex flex-col md:flex-row gap-2 sm:gap-3 items-center justify-between shrink-0">
+                        <div className="relative w-full max-w-md">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                            <input
+                                type="text"
+                                placeholder="Search by customer or invoice #"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs sm:text-sm focus:outline-none focus:border-crm-500 font-medium"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 self-end max-w-full overflow-x-auto">
+                            <div className="flex bg-slate-100 p-1 rounded-xl shrink-0">
+                                <button
+                                    onClick={() => setStatusFilter('all')}
+                                    className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                                        statusFilter === 'all'
+                                            ? 'bg-white text-crm-600 shadow-sm'
+                                            : 'text-slate-500'
+                                    }`}
+                                >
+                                    All
+                                </button>
+                                {PAYMENT_STATUS_OPTIONS.map((opt) => (
                                     <button
-                                        onClick={() => setStatusFilter('all')}
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => setStatusFilter(opt.value)}
                                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                                            statusFilter === 'all'
+                                            statusFilter === opt.value
                                                 ? 'bg-white text-crm-600 shadow-sm'
                                                 : 'text-slate-500'
                                         }`}
                                     >
-                                        All
+                                        {opt.label}
                                     </button>
-                                    {PAYMENT_STATUS_OPTIONS.map((opt) => (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            onClick={() => setStatusFilter(opt.value)}
-                                            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                                                statusFilter === opt.value
-                                                    ? 'bg-white text-crm-600 shadow-sm'
-                                                    : 'text-slate-500'
-                                            }`}
-                                        >
-                                            {opt.label}
-                                        </button>
-                                    ))}
-                                </div>
+                                ))}
                             </div>
                         </div>
+                    </div>
 
+                    <VisibleScrollArea>
                         {/* Table */}
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-50">
+                        <table className="w-full min-w-[1100px] text-left border-collapse">
+                            <thead className="bg-slate-50 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Invoice / Customer</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Package Details</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Managed By</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Bill</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount Paid</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Settlement</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Invoice / Customer</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Package Details</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Managed By</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Total Bill</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Amount Paid</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Settlement</th>
+                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right whitespace-nowrap">Action</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
@@ -418,8 +426,7 @@ const Finance = () => {
                                                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
                                                                 {currencySymbol}
                                                             </span>
-                                                            <input
-                                                                type="number"
+                                                            <NumberInput
                                                                 min={toInputAmount(1)}
                                                                 max={toInputAmount(Math.max(1, payment.total - 1))}
                                                                 step={priceInputStep}
@@ -489,7 +496,7 @@ const Finance = () => {
                                 })}
                                 {visibleInvoiceRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="py-20 text-center">
+                                        <td colSpan={7} className="py-20 text-center">
                                             <div className="flex flex-col items-center gap-4">
                                                 <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200">
                                                     <FileText size={32} />
@@ -501,7 +508,7 @@ const Finance = () => {
                                 )}
                             </tbody>
                         </table>
-                    </div>
+                    </VisibleScrollArea>
                 </div>
             </div>
 
@@ -654,6 +661,7 @@ const Finance = () => {
                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Accounts Dept.</p>
                                 </div>
                             </div>
+                            <AgencyBankDetailsBlock details={agencyBankDetails} variant="print" />
                         </div>
                     </div>
                 </div>

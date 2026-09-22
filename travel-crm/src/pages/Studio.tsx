@@ -1,7 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import NumberInput from '../components/NumberInput';
 import { sourceCountries } from '../utils/aviationData';
 import CountryFlag from '../components/CountryFlag';
 import DropdownChevron from '../components/DropdownChevron';
+import CountryGroupedOptions from '../components/CountryGroupedOptions';
+import { resolveWorldCountryName, sortCountriesWithTrending } from '../utils/worldLocations';
 import {
     Hotel,
     Palmtree,
@@ -132,7 +135,9 @@ const Studio = () => {
                 if (loc) countriesArr.add(loc);
             });
         }
-        return Array.from(countriesArr).sort();
+        return sortCountriesWithTrending(
+            Array.from(countriesArr).map((c) => resolveWorldCountryName(c) || c)
+        );
     }, [hotels, activities, presets]);
 
     const [showModal, setShowModal] = useState(false);
@@ -306,13 +311,13 @@ const Studio = () => {
 
     return (
         <div className="h-full flex flex-col gap-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
                         {isAdmin ? (
-                            <Crown className="text-crm-600" />
+                            <Crown className="text-crm-600 shrink-0" />
                         ) : (
-                            <Box className="text-crm-600" />
+                            <Box className="text-crm-600 shrink-0" />
                         )}{' '}
                         {isAdmin ? 'Subscription Plans' : 'Package Studio'}
                     </h1>
@@ -323,112 +328,126 @@ const Studio = () => {
                     </p>
                 </div>
                 {!isAdmin && (
-                <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+                <div className="flex flex-nowrap items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner w-full max-w-full overflow-x-auto">
                     <button
                         onClick={() => setActiveTab('hotels')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'hotels' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`flex items-center gap-2 px-4 lg:px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === 'hotels' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                        <Palmtree size={18} /> Hotels
+                        <Palmtree size={18} className="shrink-0" /> Hotels
                     </button>
                     <button
                         onClick={() => setActiveTab('activities')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'activities' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`flex items-center gap-2 px-4 lg:px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === 'activities' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                        <Zap size={18} /> Activities
+                        <Zap size={18} className="shrink-0" /> Activities
                     </button>
                     <button
                         onClick={() => setActiveTab('presets')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'presets' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`flex items-center gap-2 px-4 lg:px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeTab === 'presets' ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                        <Layers size={18} /> Presets
+                        <Layers size={18} className="shrink-0" /> Presets
                     </button>
                 </div>
                 )}
             </div>
 
             <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col">
-                <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-slate-50/50">
-                    <div className="flex flex-col md:flex-row gap-8 items-center flex-1">
-                        <div className="relative w-full md:w-80 group">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-crm-500 transition-colors" size={18} />
-                            <input
-                                type="text"
-                                placeholder={isAdmin ? 'Search plans...' : `Search ${activeTab}...`}
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-12 pr-4 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-medium focus:border-crm-500 outline-none transition-all"
-                            />
-                        </div>
-                        {(isAdmin || activeTab === 'plans') && (
-                            <p className="text-xs font-bold text-slate-500 max-w-md">
+                <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col gap-4 bg-slate-50/50">
+                    {(isAdmin || activeTab === 'plans') ? (
+                        <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
+                            <div className="relative w-full group">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-crm-500 transition-colors" size={18} />
+                                <input
+                                    type="text"
+                                    placeholder={isAdmin ? 'Search plans...' : `Search ${activeTab}...`}
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-12 pr-4 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-medium focus:border-crm-500 outline-none transition-all"
+                                />
+                            </div>
+                            <p className="text-xs font-bold text-slate-500 sm:max-w-md shrink-0">
                                 Changes apply to the Plans page and agent billing across the platform.
                             </p>
-                        )}
-                        {/* PREMIUM REGIONAL SELECTOR (Studio Version) */}
-                        {!isAdmin && activeTab !== 'plans' && (
-                        <div className="relative">
                             <button
-                                type="button"
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsRegionDropdownOpen(!isRegionDropdownOpen); }}
-                                className="flex items-center justify-between gap-4 px-5 py-3 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-crm-400 hover:shadow-md transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group min-w-[200px]"
+                                onClick={() => { setEditingItem(null); setShowModal(true); }}
+                                className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-slate-800 transform active:scale-95 transition-all shadow-lg shadow-slate-900/20 whitespace-nowrap shrink-0"
                             >
-                                <div className="flex items-center gap-3">
-                                    <CountryFlag
-                                        country={countryFilter || null}
-                                        size={24}
-                                        global={!countryFilter}
-                                    />
-                                    <div className="text-left">
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Catalog Focus</p>
-                                        <p className="text-sm font-black text-slate-800 uppercase tracking-tight">
-                                            {countryFilter || 'Global Inventory'}
-                                        </p>
-                                    </div>
-                                </div>
-                                <DropdownChevron open={isRegionDropdownOpen} className="text-slate-400" size={16} />
+                                <Plus size={18} className="shrink-0" /> Add New Plan
                             </button>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex flex-nowrap items-center gap-3 w-full">
+                                <div className="relative shrink-0 min-w-0">
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsRegionDropdownOpen(!isRegionDropdownOpen); }}
+                                        className="flex items-center justify-between gap-3 sm:gap-4 px-4 sm:px-5 py-3 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-crm-400 hover:shadow-md transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group whitespace-nowrap"
+                                    >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <CountryFlag
+                                                country={countryFilter || null}
+                                                size={24}
+                                                global={!countryFilter}
+                                            />
+                                            <div className="text-left min-w-0">
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1 whitespace-nowrap">Catalog Focus</p>
+                                                <p className="text-sm font-black text-slate-800 uppercase tracking-tight whitespace-nowrap truncate max-w-[140px] sm:max-w-none">
+                                                    {countryFilter || 'Global Inventory'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <DropdownChevron open={isRegionDropdownOpen} className="text-slate-400 shrink-0" size={16} />
+                                    </button>
 
-                            {isRegionDropdownOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]" onClick={() => setIsRegionDropdownOpen(false)}></div>
-                                    <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-                                        <div className="p-2 space-y-1 max-h-[400px] overflow-y-auto custom-scrollbar">
-                                            <button
-                                                onClick={() => { setCountryFilter(''); setIsRegionDropdownOpen(false); }}
-                                                className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all ${!countryFilter ? 'bg-crm-50 text-crm-700' : 'hover:bg-slate-50 text-slate-500'}`}
-                                            >
-                                                <CountryFlag global size={24} />
-                                                <div className="text-left">
-                                                    <p className="text-xs font-black uppercase tracking-tight">Global Catalog</p>
-                                                    <p className="text-[10px] opacity-70">Master inventory view</p>
-                                                </div>
-                                            </button>
-                                            {(uniqueCountries || []).map(c => (
+                                    {isRegionDropdownOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]" onClick={() => setIsRegionDropdownOpen(false)}></div>
+                                            <div className="absolute top-full left-0 mt-2 w-full min-w-[240px] bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+                                                <div className="p-2 space-y-1 max-h-[400px] overflow-y-auto custom-scrollbar">
                                                     <button
-                                                        key={c}
-                                                        onClick={() => { setCountryFilter(c); setIsRegionDropdownOpen(false); }}
-                                                        className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all ${countryFilter === c ? 'bg-crm-50 text-crm-700' : 'hover:bg-slate-100 text-slate-600'}`}
+                                                        onClick={() => { setCountryFilter(''); setIsRegionDropdownOpen(false); }}
+                                                        className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all ${!countryFilter ? 'bg-crm-50 text-crm-700' : 'hover:bg-slate-50 text-slate-500'}`}
                                                     >
-                                                        <CountryFlag country={c} size={24} />
+                                                        <CountryFlag global size={24} />
                                                         <div className="text-left">
-                                                            <p className="text-xs font-black uppercase tracking-tight">{c}</p>
-                                                            <p className="text-[10px] opacity-70">Switch focus to {c}</p>
+                                                            <p className="text-xs font-black uppercase tracking-tight">Global Catalog</p>
+                                                            <p className="text-[10px] opacity-70">Master inventory view</p>
                                                         </div>
                                                     </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                        )}
-                    </div>
-                    <button
-                        onClick={() => { setEditingItem(null); setShowModal(true); }}
-                        className="w-full md:w-auto px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-slate-800 transform active:scale-95 transition-all shadow-lg shadow-slate-900/20"
-                    >
-                        <Plus size={18} /> Add New {isAdmin ? 'Plan' : TAB_SINGULAR[activeTab]}
-                    </button>
+                                                    <CountryGroupedOptions
+                                                        options={uniqueCountries || []}
+                                                        selected={countryFilter}
+                                                        onSelect={(c) => {
+                                                            setCountryFilter(c);
+                                                            setIsRegionDropdownOpen(false);
+                                                        }}
+                                                        emptyMessage="No catalog countries yet"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => { setEditingItem(null); setShowModal(true); }}
+                                    className="ml-auto px-4 sm:px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-slate-800 transform active:scale-95 transition-all shadow-lg shadow-slate-900/20 whitespace-nowrap shrink-0"
+                                >
+                                    <Plus size={18} className="shrink-0" /> Add New {TAB_SINGULAR[activeTab]}
+                                </button>
+                            </div>
+                            <div className="relative w-full group">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-crm-500 transition-colors" size={18} />
+                                <input
+                                    type="text"
+                                    placeholder={`Search ${activeTab}...`}
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-12 pr-4 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-medium focus:border-crm-500 outline-none transition-all"
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-5">
@@ -696,27 +715,27 @@ const Studio = () => {
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Std Rate</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="standardRate" defaultValue={editingItem?.standardRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="standardRate" defaultValue={editingItem?.standardRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Deluxe Rate</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="deluxeRate" defaultValue={editingItem?.deluxeRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="deluxeRate" defaultValue={editingItem?.deluxeRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Luxury Rate</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="luxuryRate" defaultValue={editingItem?.luxuryRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="luxuryRate" defaultValue={editingItem?.luxuryRate} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Rating (1-5)</label>
-                                            <input type="number" name="rating" min="1" max="5" defaultValue={editingItem?.rating || 5} required className="w-64 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                            <NumberInput name="rating" min="1" max="5" defaultValue={editingItem?.rating || 5} required className="w-64 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                         </div>
                                     </>
                                 )}
@@ -734,7 +753,7 @@ const Studio = () => {
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Base Price / Person</label>
-                                                <input type="number" name="price" defaultValue={getActivityPrice(editingItem || {})} required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                <NumberInput name="price" defaultValue={getActivityPrice(editingItem || {})} required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                             </div>
                                         </div>
                                         <div className="space-y-2">
@@ -810,8 +829,7 @@ const Studio = () => {
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                                                     Staff Limit
                                                 </label>
-                                                <input
-                                                    type="number"
+                                                <NumberInput
                                                     name="staffLimit"
                                                     min={0}
                                                     defaultValue={editingItem?.staffLimit ?? 5}
@@ -824,8 +842,7 @@ const Studio = () => {
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                                                     Sub-Agent Limit
                                                 </label>
-                                                <input
-                                                    type="number"
+                                                <NumberInput
                                                     name="subAgentLimit"
                                                     min={0}
                                                     defaultValue={editingItem?.subAgentLimit ?? 2}
@@ -867,28 +884,28 @@ const Studio = () => {
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Hotel Cost (Base)</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="hotelCost" defaultValue={editingItem?.hotelCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="hotelCost" defaultValue={editingItem?.hotelCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Flight Cost</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="flightCost" defaultValue={editingItem?.flightCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="flightCost" defaultValue={editingItem?.flightCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Activity Cost</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="activityCost" defaultValue={editingItem?.activityCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="activityCost" defaultValue={editingItem?.activityCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Transfer Cost</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="transferCost" defaultValue={editingItem?.transferCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="transferCost" defaultValue={editingItem?.transferCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                         </div>
@@ -897,7 +914,7 @@ const Studio = () => {
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visa Cost / Person</label>
                                                 <div className="relative">
                                                     <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                                    <input type="number" name="visaCost" defaultValue={editingItem?.visaCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
+                                                    <NumberInput name="visaCost" defaultValue={editingItem?.visaCost || 0} required className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none" />
                                                 </div>
                                             </div>
                                             <div className="space-y-2">

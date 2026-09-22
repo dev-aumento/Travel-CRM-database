@@ -17,6 +17,7 @@ import {
     recordBelongsToAgent,
     resolveMainAgencyAgentId,
 } from '../utils/databaseSync';
+import { groupCountriesWithTrending, resolveWorldCountryName, sortCountriesWithTrending } from '../utils/worldLocations';
 
 const DatabasePage = () => {
     const { db, addRecord, updateRecord, deleteRecord, getNextId } = useDatabase();
@@ -75,7 +76,9 @@ const DatabasePage = () => {
                 countries.add(country);
             }
         });
-        return Array.from(countries).sort();
+        return sortCountriesWithTrending(
+            Array.from(countries).map((c) => resolveWorldCountryName(c) || c)
+        );
     }, [currentTable]);
 
     const filteredData = useMemo(() => {
@@ -390,9 +393,27 @@ const DatabasePage = () => {
                                     className="px-3 py-2 pr-9 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-crm-500 focus:ring-1 focus:ring-crm-500 bg-slate-50 text-slate-700 font-medium cursor-pointer appearance-none"
                                 >
                                     <option value="">All Regions</option>
-                                    {uniqueCountries.map(c => (
-                                        <option key={c} value={c}>{c}</option>
-                                    ))}
+                                    {(() => {
+                                        const { trending, other } = groupCountriesWithTrending(uniqueCountries);
+                                        return (
+                                            <>
+                                                {trending.length > 0 && (
+                                                    <optgroup label="Trending countries">
+                                                        {trending.map((c) => (
+                                                            <option key={`trend-${c}`} value={c}>{c}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                )}
+                                                {other.length > 0 && (
+                                                    <optgroup label="Other countries">
+                                                        {other.map((c) => (
+                                                            <option key={`other-${c}`} value={c}>{c}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </select>
                                 <DropdownChevron size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                 </div>

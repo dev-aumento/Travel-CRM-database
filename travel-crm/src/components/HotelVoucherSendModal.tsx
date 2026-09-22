@@ -339,11 +339,11 @@ const HotelVoucherSendModal: React.FC<Props> = ({ context, db, onClose, onSent, 
                 </div>
 
                 {!canSendViaApi && !sent && (
-                    <div className="shrink-0 mx-6 mt-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
+                    <div className="shrink-0 mx-6 mt-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 dark:bg-amber-900/30 dark:border-amber-700/50 dark:text-white">
                         {canOpenAgencyProfile ? (
                             <>
                                 Configure EmailJS under{' '}
-                                <Link to="/settings" className="font-bold underline" onClick={onClose}>
+                                <Link to="/settings" className="font-bold underline dark:text-white" onClick={onClose}>
                                     Agency Profile → Integrations
                                 </Link>{' '}
                                 to send vouchers directly from the CRM.

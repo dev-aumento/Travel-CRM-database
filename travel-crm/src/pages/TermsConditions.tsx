@@ -9,6 +9,7 @@ import {
     sanitizeTermsHtml,
     termsContentIsEmpty,
 } from '../utils/termsRichText';
+import { resolveWorldCountryName, sortCountriesWithTrending } from '../utils/worldLocations';
 
 const EMPTY_FORM = {
     title: '',
@@ -34,7 +35,11 @@ const TermsConditions = () => {
         const fromHotels = Array.from(
             new Set((db?.hotels?.data || []).map((h: any) => h.destination || h.location).filter(Boolean))
         );
-        return Array.from(new Set([...fromDb, ...fromHotels])).sort();
+        return sortCountriesWithTrending(
+            Array.from(new Set([...fromDb, ...fromHotels])).map(
+                (c) => resolveWorldCountryName(String(c).split(',').pop()?.trim() || String(c)) || String(c)
+            )
+        );
     }, [db?.destinations?.data, db?.hotels?.data]);
 
     const visibleTerms = useMemo(() => {
@@ -118,8 +123,8 @@ const TermsConditions = () => {
 
     return (
         <div className="w-full h-full flex flex-col gap-6 min-h-0">
-            <div className="shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
+            <div className="shrink-0 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                <div className="min-w-0">
                     <h1 className="text-2xl font-black text-slate-900">Terms & Conditions</h1>
                     <p className="text-slate-500 mt-1 text-sm">
                         Create location-specific terms. They appear automatically on quotations, print PDFs, and WhatsApp messages.
@@ -128,9 +133,9 @@ const TermsConditions = () => {
                 <button
                     type="button"
                     onClick={openCreate}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold shadow-md"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-bold shadow-md whitespace-nowrap shrink-0 self-start sm:self-auto"
                 >
-                    <Plus size={18} /> Add Terms
+                    <Plus size={18} className="shrink-0" /> Add Terms
                 </button>
             </div>
 
@@ -321,9 +326,9 @@ const TermsConditions = () => {
                             <button
                                 type="button"
                                 onClick={handleSave}
-                                className="px-6 py-2.5 bg-crm-600 text-white rounded-xl text-sm font-bold inline-flex items-center gap-2"
+                                className="px-6 py-2.5 bg-crm-600 text-white rounded-xl text-sm font-bold inline-flex items-center gap-2 whitespace-nowrap"
                             >
-                                <CheckCircle2 size={16} /> Save Terms
+                                <CheckCircle2 size={16} className="shrink-0" /> Save Terms
                             </button>
                         </div>
                     </div>

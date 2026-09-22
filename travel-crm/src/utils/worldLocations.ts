@@ -205,6 +205,92 @@ export const resolveWorldCountryName = (country: string): string => {
     return direct || raw;
 };
 
+/** Popular / trending destinations shown first in country pickers across the CRM. */
+export const TRENDING_DESTINATION_COUNTRIES: string[] = [
+    'India',
+    'United Arab Emirates', // Dubai / UAE
+    'Thailand',
+    'United Kingdom',
+    'United States',
+    'Switzerland',
+    'Indonesia',
+];
+
+/**
+ * Split countries into trending (fixed order) and other (A–Z).
+ * Dedupes by resolved world country name.
+ */
+export const groupCountriesWithTrending = (
+    countries: string[]
+): { trending: string[]; other: string[] } => {
+    const byKey = new Map<string, string>();
+
+    countries.forEach((label) => {
+        const trimmed = String(label || '').trim();
+        if (!trimmed) return;
+        const resolved = resolveWorldCountryName(trimmed) || trimmed;
+        const key = normalizeKey(resolved);
+        if (!byKey.has(key)) byKey.set(key, resolved);
+    });
+
+    const remaining = new Map(byKey);
+    const trending: string[] = [];
+
+    TRENDING_DESTINATION_COUNTRIES.forEach((name) => {
+        const key = normalizeKey(name);
+        const match = remaining.get(key);
+        if (match) {
+            trending.push(match);
+            remaining.delete(key);
+        }
+    });
+
+    const other = Array.from(remaining.values()).sort((a, b) => a.localeCompare(b));
+    return { trending, other };
+};
+
+/**
+ * Sort country labels with trending destinations first (stable trending order),
+ * then the remaining countries A–Z. Dedupes by resolved world country name.
+ */
+export const sortCountriesWithTrending = (countries: string[]): string[] => {
+    const { trending, other } = groupCountriesWithTrending(countries);
+    return [...trending, ...other];
+};
+
+/** Partition any item list by trending country label (preserves trending order). */
+export const partitionByTrendingCountry = <T,>(
+    items: T[],
+    getCountry: (item: T) => string
+): { trending: T[]; other: T[] } => {
+    const labels = items.map((item) => getCountry(item));
+    const { trending: trendingLabels } = groupCountriesWithTrending(labels);
+    const trendingKeys = new Set(trendingLabels.map((name) => normalizeKey(name)));
+
+    const trending: T[] = [];
+    trendingLabels.forEach((label) => {
+        const key = normalizeKey(label);
+        const match = items.find((item) => {
+            const resolved = resolveWorldCountryName(getCountry(item)) || getCountry(item);
+            return normalizeKey(resolved) === key;
+        });
+        if (match) trending.push(match);
+    });
+
+    const other = items
+        .filter((item) => {
+            const resolved = resolveWorldCountryName(getCountry(item)) || getCountry(item);
+            return !trendingKeys.has(normalizeKey(resolved));
+        })
+        .sort((a, b) => {
+            const left = resolveWorldCountryName(getCountry(a)) || getCountry(a);
+            const right = resolveWorldCountryName(getCountry(b)) || getCountry(b);
+            return left.localeCompare(right);
+        });
+
+    return { trending, other };
+};
+
 /** Merge world countries with any catalog-only country labels still in use. */
 export const buildCountryOptions = (catalogCountries: string[] = []): string[] => {
     const merged = new Set<string>(WORLD_COUNTRIES);
@@ -213,7 +299,7 @@ export const buildCountryOptions = (catalogCountries: string[] = []): string[] =
         if (resolved) merged.add(resolved);
         else if (label.trim()) merged.add(label.trim());
     });
-    return Array.from(merged).sort((a, b) => a.localeCompare(b));
+    return sortCountriesWithTrending(Array.from(merged));
 };
 
 const uniqueSorted = (values: string[]): string[] => {

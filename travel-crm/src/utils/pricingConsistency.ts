@@ -218,21 +218,45 @@ export type QuoteAdditionalServiceChargeConfig = {
     enabled: boolean;
     percent: number;
     fixedAmount: number;
+    /** Fixed 5% GST on (subtotal + additional service charge). */
+    gstOnPackageEnabled?: boolean;
+    /** Fixed 18% GST on additional service charge only. */
+    gstOnAdditionalEnabled?: boolean;
+    /** @deprecated Legacy single GST flag — migrated into gstOnAdditionalEnabled. */
     gstEnabled?: boolean;
+    /** @deprecated Legacy free-form GST % — ignored when dual GST flags are present. */
     gstPercent?: number;
 };
+
+export const PACKAGE_GST_PERCENT = 5;
+export const ADDITIONAL_CHARGE_GST_PERCENT = 18;
 
 export const normalizeQuoteAdditionalServiceCharge = (quote: any): QuoteAdditionalServiceChargeConfig => {
     const raw = quote?.additionalServiceCharge;
     if (!raw || typeof raw !== 'object') {
-        return { enabled: false, percent: 0, fixedAmount: 0, gstEnabled: false, gstPercent: 0 };
+        return {
+            enabled: false,
+            percent: 0,
+            fixedAmount: 0,
+            gstOnPackageEnabled: false,
+            gstOnAdditionalEnabled: false,
+        };
     }
+    const row = raw as Record<string, unknown>;
+    const hasDualFlags =
+        Object.prototype.hasOwnProperty.call(row, 'gstOnPackageEnabled') ||
+        Object.prototype.hasOwnProperty.call(row, 'gstOnAdditionalEnabled');
+    const legacyGst = Boolean(row.gstEnabled);
     return {
-        enabled: Boolean((raw as any).enabled),
-        percent: Math.max(0, Number((raw as any).percent) || 0),
-        fixedAmount: Math.max(0, Number((raw as any).fixedAmount) || 0),
-        gstEnabled: Boolean((raw as any).gstEnabled),
-        gstPercent: Math.max(0, Number((raw as any).gstPercent) || 0),
+        enabled: Boolean(row.enabled),
+        percent: Math.max(0, Number(row.percent) || 0),
+        fixedAmount: Math.max(0, Number(row.fixedAmount) || 0),
+        gstOnPackageEnabled: hasDualFlags
+            ? Boolean(row.gstOnPackageEnabled)
+            : false,
+        gstOnAdditionalEnabled: hasDualFlags
+            ? Boolean(row.gstOnAdditionalEnabled)
+            : legacyGst,
     };
 };
 
@@ -253,13 +277,32 @@ export const calculateAdditionalServiceChargeAmount = (
     return 0;
 };
 
-/** GST applied only on the additional service charge amount. */
+/** 5% GST on whole package (subtotal + additional service charge). */
+export const calculateGstOnPackage = (
+    packageBase: number,
+    config: Pick<QuoteAdditionalServiceChargeConfig, 'gstOnPackageEnabled'>
+): number => {
+    if (!config.gstOnPackageEnabled || packageBase <= 0) return 0;
+    return Math.round(packageBase * (PACKAGE_GST_PERCENT / 100));
+};
+
+/** 18% GST on additional service charge only. */
 export const calculateGstOnAdditionalServiceCharge = (
     chargeAmount: number,
-    config: Pick<QuoteAdditionalServiceChargeConfig, 'gstEnabled' | 'gstPercent'>
+    config: Pick<
+        QuoteAdditionalServiceChargeConfig,
+        'gstOnAdditionalEnabled' | 'gstEnabled' | 'gstPercent'
+    >
 ): number => {
-    if (!config.gstEnabled || chargeAmount <= 0) return 0;
-    const percent = Math.max(0, Number(config.gstPercent) || 0);
+    const enabled =
+        config.gstOnAdditionalEnabled === true ||
+        (config.gstOnAdditionalEnabled == null && config.gstEnabled === true);
+    if (!enabled || chargeAmount <= 0) return 0;
+    // Dual-GST mode always uses fixed 18%; legacy free-form percent only if dual flag absent and percent set.
+    if (config.gstOnAdditionalEnabled === true) {
+        return Math.round(chargeAmount * (ADDITIONAL_CHARGE_GST_PERCENT / 100));
+    }
+    const percent = Math.max(0, Number(config.gstPercent) || ADDITIONAL_CHARGE_GST_PERCENT);
     if (percent <= 0) return 0;
     return Math.round(chargeAmount * (percent / 100));
 };
@@ -267,8 +310,8 @@ export const calculateGstOnAdditionalServiceCharge = (
 export const appendServiceChargeAndGstLineItems = (
     baseItems: any[],
     chargeAmount: number,
-    gstAmount: number,
-    gstPercent = 0
+    gstOnPackageAmount: number,
+    gstOnAdditionalAmount: number
 ) => {
     const items = [...baseItems];
     if (chargeAmount > 0) {
@@ -280,13 +323,22 @@ export const appendServiceChargeAndGstLineItems = (
             total: chargeAmount,
         });
     }
-    if (gstAmount > 0) {
+    if (gstOnPackageAmount > 0) {
         items.push({
-            desc: 'GST',
-            sub: `${gstPercent}% on additional service charge`,
+            desc: 'GST on Package',
+            sub: `${PACKAGE_GST_PERCENT}% on package total (incl. additional charges)`,
             qty: '1',
-            price: gstAmount,
-            total: gstAmount,
+            price: gstOnPackageAmount,
+            total: gstOnPackageAmount,
+        });
+    }
+    if (gstOnAdditionalAmount > 0) {
+        items.push({
+            desc: 'GST on Additional Charges',
+            sub: `${ADDITIONAL_CHARGE_GST_PERCENT}% on additional service charge`,
+            qty: '1',
+            price: gstOnAdditionalAmount,
+            total: gstOnAdditionalAmount,
         });
     }
     return items;
@@ -307,10 +359,15 @@ const applyServiceChargeToEstimate = (
         estimate.services,
         serviceChargeConfig
     );
-    const taxes = calculateGstOnAdditionalServiceCharge(charge, serviceChargeConfig);
+    const packageBase = estimate.subtotal + charge;
+    const gstOnPackage = calculateGstOnPackage(packageBase, serviceChargeConfig);
+    const gstOnAdditional = calculateGstOnAdditionalServiceCharge(charge, serviceChargeConfig);
+    const taxes = gstOnPackage + gstOnAdditional;
     return {
         ...estimate,
         additionalServiceCharge: charge,
+        gstOnPackage,
+        gstOnAdditional,
         taxes,
         total: estimate.subtotal + charge + taxes,
     };
@@ -533,12 +590,12 @@ export const reconcileQuotationPricing = (quote: any, db: any) => {
     if (!resolved) return quote;
 
     const { pricing, subtotal, taxes, total, additionalServiceCharge } = resolved;
-    const serviceChargeConfig = normalizeQuoteAdditionalServiceCharge(quote);
+    const buckets = buildQuoteEstimateBuckets(quote, pricing, db);
     const items = appendServiceChargeAndGstLineItems(
         buildQuoteLineItemsFromQuote(quote, pricing, db),
         additionalServiceCharge,
-        taxes,
-        serviceChargeConfig.gstPercent || 0
+        buckets.gstOnPackage || 0,
+        buckets.gstOnAdditional || 0
     );
 
     const next = {
@@ -624,6 +681,8 @@ export type QuotePricingDisplay = {
     subtotal: number;
     taxes: number;
     additionalServiceCharge: number;
+    gstOnPackage: number;
+    gstOnAdditional: number;
     travelersLabel: string;
     perPersonBase: number;
     breakdown: {
@@ -648,6 +707,8 @@ export const getQuotePricingDisplay = (quote: any, db: any): QuotePricingDisplay
                 subtotal: buckets.subtotal,
                 taxes: buckets.taxes,
                 additionalServiceCharge: buckets.additionalServiceCharge || 0,
+                gstOnPackage: buckets.gstOnPackage || 0,
+                gstOnAdditional: buckets.gstOnAdditional || 0,
                 travelersLabel: quote?.travelers || resolved.pricing.travelersLabel,
                 perPersonBase:
                     buckets.total > 0 ? Math.round(buckets.total / pax) : 0,
@@ -675,6 +736,8 @@ export const getQuotePricingDisplay = (quote: any, db: any): QuotePricingDisplay
         additionalServiceCharge: normalizeQuoteAdditionalServiceCharge(quote).enabled
             ? calculateAdditionalServiceChargeAmount(parts.services, normalizeQuoteAdditionalServiceCharge(quote))
             : parseAmount(quote?.additionalServiceChargeAmount),
+        gstOnPackage: 0,
+        gstOnAdditional: 0,
         travelersLabel: quote?.travelers || `${travelers.adults} Adults`,
         perPersonBase: total > 0 ? Math.round(total / pax) : 0,
         breakdown: parts,
@@ -689,6 +752,8 @@ export const resolveQuoteFinancials = (quote: any, pricing: PricingResult, db: a
         taxes: buckets.taxes,
         total: buckets.total,
         additionalServiceChargeAmount: buckets.additionalServiceCharge || 0,
+        gstOnPackage: buckets.gstOnPackage || 0,
+        gstOnAdditional: buckets.gstOnAdditional || 0,
     };
 };
 
@@ -707,6 +772,8 @@ export const getLiveQuoteEstimateDisplay = (
         subtotal: buckets.subtotal,
         taxes: buckets.taxes,
         additionalServiceCharge: buckets.additionalServiceCharge || 0,
+        gstOnPackage: buckets.gstOnPackage || 0,
+        gstOnAdditional: buckets.gstOnAdditional || 0,
         travelersLabel: pricing.travelersLabel,
         perPersonBase: buckets.total > 0 ? Math.round(buckets.total / pax) : 0,
         breakdown: {

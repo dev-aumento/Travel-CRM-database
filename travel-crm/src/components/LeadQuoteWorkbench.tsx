@@ -15,7 +15,6 @@ import {
     Plane,
     FileText,
     Pencil,
-    ChevronRight,
     CheckCircle2,
     Trash2,
 } from 'lucide-react';
@@ -28,10 +27,57 @@ import {
     quoteVersionDepth,
 } from '../utils/quoteActivities';
 import { getQuotePricingDisplay, getUnifiedTotalForQuote, isTemplatePackageQuote } from '../utils/pricingConsistency';
+import { formatHotelNightDateLabel, sumStayHotelTotal } from '../utils/hotelStayPricing';
 import { useCurrency } from '../hooks/useCurrency';
 import { parseTravelers } from '../utils/pricing';
 import { resolveQuoteTermsForQuote, getFallbackTermsRecord } from '../utils/quoteTerms';
 import QuoteTermsSection from './QuoteTermsSection';
+
+const formatStayDayLabel = (d: Date) => {
+    const day = d.getDate();
+    const suffix =
+        day % 10 === 1 && day !== 11
+            ? 'st'
+            : day % 10 === 2 && day !== 12
+              ? 'nd'
+              : day % 10 === 3 && day !== 13
+                ? 'rd'
+                : 'th';
+    const month = d.toLocaleDateString('en-US', { month: 'short' });
+    return `${day}${suffix} ${month}`;
+};
+
+const getQuoteStayDateLabel = (quote: any, stayIdx: number): string => {
+    const departure = quote?.departureDate;
+    if (!departure) return '';
+    const stays = Array.isArray(quote?.hotelStays) ? quote.hotelStays : [];
+    const stay = stays[stayIdx];
+    const nights = Math.max(1, Number(stay?.nights || 1));
+    const offsetNights = stays
+        .slice(0, stayIdx)
+        .reduce((sum: number, s: any) => sum + Math.max(1, Number(s?.nights || 1)), 0);
+    const start = new Date(departure);
+    if (Number.isNaN(start.getTime())) return '';
+    start.setDate(start.getDate() + offsetNights);
+    const end = new Date(start);
+    end.setDate(end.getDate() + Math.max(0, nights - 1));
+    return nights === 1
+        ? formatStayDayLabel(start)
+        : `${formatStayDayLabel(start)} - ${formatStayDayLabel(end)}`;
+};
+
+const getQuoteStayNightStart = (quote: any, stayIdx: number): Date | null => {
+    const departure = quote?.departureDate;
+    if (!departure) return null;
+    const stays = Array.isArray(quote?.hotelStays) ? quote.hotelStays : [];
+    const offsetNights = stays
+        .slice(0, stayIdx)
+        .reduce((sum: number, s: any) => sum + Math.max(1, Number(s?.nights || 1)), 0);
+    const start = new Date(departure);
+    if (Number.isNaN(start.getTime())) return null;
+    start.setDate(start.getDate() + offsetNights);
+    return start;
+};
 
 export type LeadWorkbenchTab = 'basic' | 'quotes' | 'new-quote' | 'activities';
 
@@ -117,6 +163,10 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
     const statusMeta = LEAD_STATUS_LABELS[lead?.status] || LEAD_STATUS_LABELS.itinerary;
     const activities = buildQuoteActivityLog(lead, quotes, db?.hotels?.data || []);
     const travelers = activeQuote ? parseTravelers(activeQuote.travelers) : parseTravelers(lead?.travelers || '2 Adults');
+    const isLeadConverted =
+        lead?.status === 'confirmed' ||
+        lead?.status === 'completed' ||
+        Boolean(String(lead?.confirmedQuoteId || '').trim());
 
     const formatTripDates = () => {
         if (displayQuote?.departureDate) {
@@ -487,12 +537,22 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                                       },
                                                   ]
                                                 : []),
-                                            ...(quotePricing.taxes > 0
+                                            ...((quotePricing.gstOnPackage || 0) > 0
                                                 ? [
                                                       {
-                                                          key: 'gst',
-                                                          label: 'GST',
-                                                          amount: quotePricing.taxes,
+                                                          key: 'gst-package',
+                                                          label: 'GST on Package (5%)',
+                                                          amount: quotePricing.gstOnPackage || 0,
+                                                          className: 'text-emerald-700',
+                                                      },
+                                                  ]
+                                                : []),
+                                            ...((quotePricing.gstOnAdditional || 0) > 0
+                                                ? [
+                                                      {
+                                                          key: 'gst-additional',
+                                                          label: 'GST on Additional (18%)',
+                                                          amount: quotePricing.gstOnAdditional || 0,
                                                           className: 'text-emerald-700',
                                                       },
                                                   ]
@@ -554,13 +614,23 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                     </p>
 
                                     {onConvert && (
-                                        <button
-                                            type="button"
-                                            onClick={() => onConvert(activeQuote)}
-                                            className="mb-8 px-6 py-3 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-black shadow-md whitespace-nowrap"
-                                        >
-                                            Convert using Quote
-                                        </button>
+                                        isLeadConverted ? (
+                                            <button
+                                                type="button"
+                                                disabled
+                                                className="mb-8 px-6 py-3 bg-slate-100 text-slate-400 rounded-xl text-sm font-black shadow-none whitespace-nowrap cursor-not-allowed border border-slate-200"
+                                            >
+                                                Converted · Confirmed
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => onConvert(activeQuote)}
+                                                className="mb-8 px-6 py-3 bg-crm-600 hover:bg-crm-700 text-white rounded-xl text-sm font-black shadow-md whitespace-nowrap"
+                                            >
+                                                Convert using Quote
+                                            </button>
+                                        )
                                     )}
 
                                     <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-500 pb-4 border-b border-slate-100 mb-6">
@@ -573,51 +643,427 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                     </div>
 
                                     <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-4">Services</h4>
-                                    <div className="space-y-3">
-                                        {(activeQuote.hotelStays || [])
-                                            .filter((s: any) => s?.hotelId)
-                                            .map((stay: any, idx: number) => {
-                                                const hotel = (db?.hotels?.data || []).find(
-                                                    (h: any) => h.id === stay.hotelId
-                                                );
-                                                return (
-                                                    <div
-                                                        key={idx}
-                                                        className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100"
-                                                    >
-                                                        <HotelIcon size={18} className="text-crm-600 shrink-0" />
-                                                        <div>
-                                                            <p className="text-sm font-bold text-slate-800">
-                                                                {hotel?.name || 'Hotel'} — {stay.nights} night(s)
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-400">
-                                                                {activeQuote.hotelTier || 'Standard'} • {stay.mealPlan || activeQuote.hotelMealPlan}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
+                                    <div className="space-y-5">
+                                        {(activeQuote.hotelStays || []).filter((s: any) => s?.hotelId || s?.hotelInput)
+                                            .length > 0 && (
+                                            <div className="space-y-3">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                                    Hotel stays
+                                                </p>
+                                                {(activeQuote.hotelStays || []).map(
+                                                    (stay: any, idx: number) => {
+                                                        if (!stay?.hotelId && !stay?.hotelInput) {
+                                                            return null;
+                                                        }
+                                                        const hotel = (db?.hotels?.data || []).find(
+                                                            (h: any) => h.id === stay.hotelId
+                                                        );
+                                                        const hotelName =
+                                                            stay.hotelInput?.trim() ||
+                                                            hotel?.name ||
+                                                            'Hotel';
+                                                        const stayDates = getQuoteStayDateLabel(
+                                                            activeQuote,
+                                                            idx
+                                                        );
+                                                        const nightStart = getQuoteStayNightStart(
+                                                            activeQuote,
+                                                            idx
+                                                        );
+                                                        const nights = Math.max(
+                                                            1,
+                                                            Number(stay.nights) || 1
+                                                        );
+                                                        const stayTotal = sumStayHotelTotal(stay);
+                                                        const nightPrices = Array.isArray(
+                                                            stay.nightPrices
+                                                        )
+                                                            ? stay.nightPrices.slice(0, nights)
+                                                            : [];
+                                                        const inclusions = (
+                                                            stay.specialInclusions || []
+                                                        ).filter((s: any) => s?.name?.trim());
+                                                        return (
+                                                            <div
+                                                                key={stay.hotelId || idx}
+                                                                className="rounded-xl border border-slate-100 bg-slate-50/80 p-4"
+                                                            >
+                                                                <div className="flex items-start gap-3 mb-3">
+                                                                    <HotelIcon
+                                                                        size={18}
+                                                                        className="text-crm-600 shrink-0 mt-0.5"
+                                                                    />
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                                                            <div>
+                                                                                <p className="text-sm font-black text-slate-800">
+                                                                                    {hotelName}
+                                                                                </p>
+                                                                                <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                                                                                    Stay {idx + 1}
+                                                                                    {stayDates
+                                                                                        ? ` · ${stayDates}`
+                                                                                        : ''}
+                                                                                    {' · '}
+                                                                                    {nights} night
+                                                                                    {nights > 1
+                                                                                        ? 's'
+                                                                                        : ''}
+                                                                                </p>
+                                                                            </div>
+                                                                            {stayTotal > 0 && (
+                                                                                <span className="text-sm font-black text-crm-700 shrink-0">
+                                                                                    {formatMoney(
+                                                                                        stayTotal
+                                                                                    )}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3 text-xs">
+                                                                            {(stay.city ||
+                                                                                hotel?.city) && (
+                                                                                <div>
+                                                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                        City / Place
+                                                                                    </p>
+                                                                                    <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                        {stay.city ||
+                                                                                            hotel?.city}
+                                                                                    </p>
+                                                                                </div>
+                                                                            )}
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                    Room
+                                                                                </p>
+                                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                    {stay.roomType ||
+                                                                                        'Standard'}
+                                                                                </p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                    Meal plan
+                                                                                </p>
+                                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                    {stay.mealPlan ||
+                                                                                        activeQuote.hotelMealPlan ||
+                                                                                        '—'}
+                                                                                </p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                    Rooms / Pax
+                                                                                </p>
+                                                                                <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                    {stay.rooms || 1}{' '}
+                                                                                    room ·{' '}
+                                                                                    {stay.personsPerRoom ||
+                                                                                        2}{' '}
+                                                                                    pax/room
+                                                                                </p>
+                                                                            </div>
+                                                                            {(stay.extraBed || 0) >
+                                                                                0 && (
+                                                                                <div>
+                                                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                        Extra beds
+                                                                                    </p>
+                                                                                    <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                        {stay.extraBed}{' '}
+                                                                                        @{' '}
+                                                                                        {formatMoney(
+                                                                                            stay.extraBedPrice ||
+                                                                                                0
+                                                                                        )}
+                                                                                        /night
+                                                                                    </p>
+                                                                                </div>
+                                                                            )}
+                                                                            {(stay.childWithBed ||
+                                                                                0) > 0 && (
+                                                                                <div>
+                                                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                        Child with bed
+                                                                                    </p>
+                                                                                    <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                        {
+                                                                                            stay.childWithBed
+                                                                                        }{' '}
+                                                                                        @{' '}
+                                                                                        {formatMoney(
+                                                                                            stay.childWithBedPrice ||
+                                                                                                0
+                                                                                        )}
+                                                                                        /night
+                                                                                    </p>
+                                                                                </div>
+                                                                            )}
+                                                                            {(stay.childWithoutBed ||
+                                                                                0) > 0 && (
+                                                                                <div>
+                                                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                                                                                        Child w/o bed
+                                                                                    </p>
+                                                                                    <p className="font-semibold text-slate-700 mt-0.5">
+                                                                                        {
+                                                                                            stay.childWithoutBed
+                                                                                        }{' '}
+                                                                                        @{' '}
+                                                                                        {formatMoney(
+                                                                                            stay.childWithoutBedPrice ||
+                                                                                                0
+                                                                                        )}
+                                                                                        /night
+                                                                                    </p>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+
+                                                                        {nightPrices.length > 0 && (
+                                                                            <div className="mt-3 pt-3 border-t border-slate-200/80">
+                                                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                                                                                    Night-wise stays
+                                                                                </p>
+                                                                                <ul className="space-y-1.5">
+                                                                                    {nightPrices.map(
+                                                                                        (
+                                                                                            np: any,
+                                                                                            nIdx: number
+                                                                                        ) => {
+                                                                                            const nightDate =
+                                                                                                nightStart
+                                                                                                    ? new Date(
+                                                                                                          nightStart
+                                                                                                      )
+                                                                                                    : null;
+                                                                                            if (
+                                                                                                nightDate
+                                                                                            ) {
+                                                                                                nightDate.setDate(
+                                                                                                    nightDate.getDate() +
+                                                                                                        nIdx
+                                                                                                );
+                                                                                            }
+                                                                                            const dateLabel =
+                                                                                                nightDate
+                                                                                                    ? formatHotelNightDateLabel(
+                                                                                                          nightDate
+                                                                                                      )
+                                                                                                    : null;
+                                                                                            const amount =
+                                                                                                Number.isFinite(
+                                                                                                    Number(
+                                                                                                        np?.given
+                                                                                                    )
+                                                                                                )
+                                                                                                    ? Number(
+                                                                                                          np.given
+                                                                                                      )
+                                                                                                    : Number(
+                                                                                                          np?.rate
+                                                                                                      ) ||
+                                                                                                      0;
+                                                                                            return (
+                                                                                                <li
+                                                                                                    key={
+                                                                                                        nIdx
+                                                                                                    }
+                                                                                                    className="flex items-center justify-between gap-3 text-xs"
+                                                                                                >
+                                                                                                    <span className="font-semibold text-slate-700">
+                                                                                                        Night{' '}
+                                                                                                        {nIdx +
+                                                                                                            1}
+                                                                                                        {dateLabel
+                                                                                                            ? ` · ${dateLabel.datePart} (${dateLabel.day})`
+                                                                                                            : ''}
+                                                                                                    </span>
+                                                                                                    <span className="font-black text-crm-700 shrink-0">
+                                                                                                        {formatMoney(
+                                                                                                            amount
+                                                                                                        )}
+                                                                                                    </span>
+                                                                                                </li>
+                                                                                            );
+                                                                                        }
+                                                                                    )}
+                                                                                </ul>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {inclusions.length > 0 && (
+                                                                            <ul className="mt-3 text-[11px] text-slate-600 space-y-0.5">
+                                                                                {inclusions.map(
+                                                                                    (s: any) => (
+                                                                                        <li
+                                                                                            key={
+                                                                                                s.id ||
+                                                                                                s.name
+                                                                                            }
+                                                                                        >
+                                                                                            +{' '}
+                                                                                            {s.name}
+                                                                                            {s.amount !=
+                                                                                                null &&
+                                                                                            s.amount >
+                                                                                                0
+                                                                                                ? ` (${formatMoney(s.amount)})`
+                                                                                                : ''}
+                                                                                        </li>
+                                                                                    )
+                                                                                )}
+                                                                            </ul>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                            </div>
+                                        )}
+
                                         {activeQuote.needFlight !== false && (
                                             <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
                                                 <Plane size={18} className="text-crm-600 shrink-0" />
-                                                <p className="text-sm font-bold text-slate-800">Flights included</p>
+                                                <p className="text-sm font-bold text-slate-800">
+                                                    Flights included
+                                                </p>
                                             </div>
                                         )}
+
                                         {activeQuote.itinerary?.length > 0 && (
-                                            <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                                <FileText size={18} className="text-crm-600 shrink-0 mt-0.5" />
-                                                <div>
-                                                    <p className="text-sm font-bold text-slate-800">
-                                                        Itinerary — {activeQuote.itinerary.length} days
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-400 mt-1 line-clamp-2">
-                                                        {activeQuote.itinerary
-                                                            .slice(0, 3)
-                                                            .map((d: any) => d.title)
-                                                            .join(' • ')}
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2">
+                                                    <FileText
+                                                        size={16}
+                                                        className="text-crm-600 shrink-0"
+                                                    />
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                                        Itinerary — {activeQuote.itinerary.length}{' '}
+                                                        day
+                                                        {activeQuote.itinerary.length !== 1
+                                                            ? 's'
+                                                            : ''}
                                                     </p>
                                                 </div>
-                                                <ChevronRight size={16} className="text-slate-300 ml-auto shrink-0" />
+                                                {(activeQuote.transportation ||
+                                                    (Number(activeQuote.vehiclePrice) || 0) >
+                                                        0) && (
+                                                    <p className="text-xs font-semibold text-slate-600">
+                                                        {activeQuote.transportation ? (
+                                                            <>
+                                                                Travel vehicle:{' '}
+                                                                <span className="text-crm-700 font-black">
+                                                                    {activeQuote.transportation}
+                                                                </span>
+                                                            </>
+                                                        ) : null}
+                                                        {(Number(activeQuote.vehiclePrice) || 0) >
+                                                            0 && (
+                                                            <span
+                                                                className={
+                                                                    activeQuote.transportation
+                                                                        ? ' ml-1'
+                                                                        : ''
+                                                                }
+                                                            >
+                                                                {activeQuote.transportation
+                                                                    ? '· '
+                                                                    : ''}
+                                                                {formatMoney(
+                                                                    Number(
+                                                                        activeQuote.vehiclePrice
+                                                                    ) || 0
+                                                                )}
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                )}
+                                                <div className="space-y-3">
+                                                    {activeQuote.itinerary.map(
+                                                        (day: any, dIdx: number) => {
+                                                            const dayTitle =
+                                                                day.title || `Day ${dIdx + 1}`;
+                                                            const activities = Array.isArray(
+                                                                day.activities
+                                                            )
+                                                                ? day.activities
+                                                                : [];
+                                                            return (
+                                                                <div
+                                                                    key={day.id || dIdx}
+                                                                    className="rounded-xl border border-slate-100 overflow-hidden bg-white"
+                                                                >
+                                                                    <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                                                                        <span className="text-xs font-black text-slate-800">
+                                                                            {dayTitle}
+                                                                        </span>
+                                                                        {day.date && (
+                                                                            <span className="text-[10px] text-slate-400 font-semibold">
+                                                                                {day.date}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {activities.length > 0 ? (
+                                                                        <ul className="divide-y divide-slate-50 px-4 py-1">
+                                                                            {activities.map(
+                                                                                (
+                                                                                    act: any,
+                                                                                    aIdx: number
+                                                                                ) => {
+                                                                                    const price =
+                                                                                        Number(
+                                                                                            act.customPrice ??
+                                                                                                act.price ??
+                                                                                                0
+                                                                                        );
+                                                                                    return (
+                                                                                        <li
+                                                                                            key={
+                                                                                                act.id ||
+                                                                                                aIdx
+                                                                                            }
+                                                                                            className="py-2.5"
+                                                                                        >
+                                                                                            <div className="flex items-start justify-between gap-3">
+                                                                                                <p className="text-xs font-bold text-slate-800">
+                                                                                                    •{' '}
+                                                                                                    {act.title ||
+                                                                                                        act.name ||
+                                                                                                        'Activity'}
+                                                                                                </p>
+                                                                                                {price >
+                                                                                                    0 && (
+                                                                                                    <span className="text-xs font-black text-crm-600 shrink-0">
+                                                                                                        {formatMoney(
+                                                                                                            price
+                                                                                                        )}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                            {act.description?.trim() && (
+                                                                                                <p className="text-[11px] text-slate-500 mt-1 ml-3 leading-relaxed whitespace-pre-wrap">
+                                                                                                    {
+                                                                                                        act.description
+                                                                                                    }
+                                                                                                </p>
+                                                                                            )}
+                                                                                        </li>
+                                                                                    );
+                                                                                }
+                                                                            )}
+                                                                        </ul>
+                                                                    ) : (
+                                                                        <p className="px-4 py-3 text-[11px] text-slate-400 italic">
+                                                                            Leisure / free time
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        }
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
                                     </div>

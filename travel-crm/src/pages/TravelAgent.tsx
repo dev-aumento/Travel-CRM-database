@@ -25,9 +25,7 @@ import {
     resolveMainAgencyAgentId,
     isSubAgencyAgentSession,
     getAgencyPlanLimits,
-    canAddAgencyStaff,
     canSessionManageStaffMember,
-    isUnlimitedPlanSlots,
 } from '../utils/databaseSync';
 import {
     COUNTRY_PHONE_DATA,
@@ -425,16 +423,6 @@ const TravelAgent = () => {
         }
     }, [isSubAgentSession, userRole, activeTab]);
 
-    const staffLimitReached = useMemo(() => {
-        if (userRole === 'admin') return false;
-        if (isUnlimitedPlanSlots(planLimits.staff)) return false;
-        return agencyStaffCount >= planLimits.staff;
-    }, [userRole, planLimits.staff, agencyStaffCount]);
-
-    const staffLimitTitle = staffLimitReached
-        ? `Plan limit reached: ${planLimits.staff} staff on ${currentPlan}. Upgrade in Plans.`
-        : undefined;
-
     const canManageStaffMember = useCallback(
         (member: any) => canSessionManageStaffMember(member, sessionAgentIdResolved, db),
         [db, sessionAgentIdResolved]
@@ -450,7 +438,6 @@ const TravelAgent = () => {
     };
 
     const openAddStaffModal = () => {
-        if (staffLimitReached) return;
         setStaffForm({
             name: '',
             employeeId: '',
@@ -467,15 +454,6 @@ const TravelAgent = () => {
         e.preventDefault();
         
         if (isIdDuplicate) return;
-
-        // Enforce Plan Limits (Skip for Admin or when editing)
-        if (!editingStaffId) {
-            const staffCheck = canAddAgencyStaff(db, sessionAgentIdResolved);
-            if (userRole !== 'admin' && !staffCheck.allowed) {
-                alert(staffCheck.message);
-                return;
-            }
-        }
 
         const staffPermissions = isSubAgentSession
             ? [...SUB_AGENT_STAFF_PERMISSIONS]
@@ -805,72 +783,78 @@ const TravelAgent = () => {
 
     return (
         <div className="h-full flex flex-col gap-6 overflow-hidden font-sans">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-                <div>
-                    <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                        <Users className="text-crm-600" size={28} /> 
-                        {userRole === 'admin' ? 'Agent Administration' : 'Agents/Team Management'}
-                    </h1>
-                    <p className="text-slate-500 text-sm font-medium">
-                        Manage your {userRole === 'admin' ? 'global network of agents' : 'agency team and agents'}.
-                    </p>
+            <div className="flex flex-col gap-3 shrink-0">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                            <Users className="text-crm-600 shrink-0" size={20} />
+                            <span className="truncate">
+                                {userRole === 'admin' ? 'Agent Administration' : 'Agents/Team Management'}
+                            </span>
+                        </h1>
+                        <p className="text-slate-500 text-xs sm:text-sm font-medium mt-0.5">
+                            Manage your {userRole === 'admin' ? 'global network of agents' : 'agency team and agents'}.
+                        </p>
+                    </div>
+
+                    {userRole === 'admin' && (
+                        <button
+                            onClick={openAddAgentModal}
+                            className="flex items-center gap-1.5 py-2 px-3 sm:px-4 text-[10px] sm:text-xs font-bold uppercase tracking-widest whitespace-nowrap shrink-0 rounded-xl text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all active:scale-95"
+                        >
+                            <UserPlus size={14} /> Add Agent
+                        </button>
+                    )}
+                    {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && (
+                        <button
+                            type="button"
+                            onClick={openAddAgentModal}
+                            className="flex items-center gap-1.5 py-2 px-3 sm:px-4 text-[10px] sm:text-xs font-bold uppercase tracking-widest whitespace-nowrap shrink-0 rounded-xl text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all active:scale-95"
+                        >
+                            <UserPlus size={14} /> Add Sub-Agent
+                        </button>
+                    )}
+                    {canManageStaffTeam && activeTab === 'staff' && (
+                        <button
+                            type="button"
+                            onClick={openAddStaffModal}
+                            className="flex items-center gap-1.5 py-2 px-3 sm:px-4 text-[10px] sm:text-xs font-bold uppercase tracking-widest whitespace-nowrap shrink-0 rounded-xl text-white bg-crm-600 hover:bg-crm-700 shadow-sm shadow-crm-600/20 transition-all active:scale-95"
+                        >
+                            <UserPlus size={14} /> Add Employee
+                        </button>
+                    )}
                 </div>
 
                 {userRole === 'agent' && (
-                    <div className="bg-white border border-slate-200 px-4 py-3 sm:px-6 rounded-2xl flex flex-wrap items-center gap-4 sm:gap-6 shadow-sm w-full lg:w-auto">
-                        <div className="flex flex-col min-w-[100px]">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Plan</span>
-                            <div className="flex items-center gap-2">
-                                <Crown size={14} className="text-amber-500 shrink-0" />
-                                <span className="text-sm font-bold text-slate-800">{currentPlan}</span>
+                    <div className="bg-white border border-slate-200 px-3 py-2 sm:px-4 rounded-xl flex flex-nowrap items-center gap-3 sm:gap-5 shadow-sm w-full overflow-x-auto">
+                        <div className="flex flex-col shrink-0">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Plan</span>
+                            <div className="flex items-center gap-1.5">
+                                <Crown size={12} className="text-amber-500 shrink-0" />
+                                <span className="text-xs font-bold text-slate-800">{currentPlan}</span>
                             </div>
                         </div>
-                        <div className="hidden sm:block h-8 w-px bg-slate-100" />
-                        <div className="flex flex-col min-w-[100px]">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <div className="h-7 w-px bg-slate-100 shrink-0" />
+                        <div className="flex flex-col shrink-0">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                                 {isSubAgentSession ? 'Agency Staff Slots' : 'Staff Slots'}
                             </span>
-                            <span className={`text-sm font-bold ${agencyStaffCount >= planLimits.staff ? 'text-red-500' : 'text-crm-600'}`}>
-                                {agencyStaffCount} / {isUnlimitedPlanSlots(planLimits.staff) ? '∞' : planLimits.staff}
+                            <span className="text-xs font-bold text-crm-600">
+                                {agencyStaffCount}
                             </span>
                         </div>
                         {!isSubAgentSession && (
                             <>
-                                <div className="hidden sm:block h-8 w-px bg-slate-100" />
-                                <div className="flex flex-col min-w-[100px]">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sub-Agent Slots</span>
-                                    <span className="text-sm font-bold text-crm-600">
+                                <div className="h-7 w-px bg-slate-100 shrink-0" />
+                                <div className="flex flex-col shrink-0">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sub-Agent Slots</span>
+                                    <span className="text-xs font-bold text-crm-600">
                                         {agencySubAgentCount}
                                     </span>
                                 </div>
                             </>
                         )}
                     </div>
-                )}
-                {userRole === 'admin' && (
-                    <button onClick={openAddAgentModal} className="btn-primary flex items-center gap-2 py-3 px-6 bg-slate-900 hover:bg-slate-800">
-                        <UserPlus size={18} /> Add Agent
-                    </button>
-                )}
-                {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && (
-                    <button
-                        type="button"
-                        onClick={openAddAgentModal}
-                        className="btn-primary flex items-center gap-2 py-3 px-6 bg-slate-900 hover:bg-slate-800"
-                    >
-                        <UserPlus size={18} /> Add Sub-Agent
-                    </button>
-                )}
-                {canManageStaffTeam && activeTab === 'staff' && (
-                    <button
-                        type="button"
-                        onClick={openAddStaffModal}
-                        disabled={staffLimitReached}
-                        title={staffLimitTitle}
-                        className="btn-primary flex items-center gap-2 py-3 px-6 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-crm-600 disabled:active:scale-100"
-                    >
-                        <UserPlus size={18} /> Add Employee
-                    </button>
                 )}
             </div>
 
@@ -1335,9 +1319,8 @@ const TravelAgent = () => {
                                 </div>
                                 <button
                                     type="submit"
-                                    disabled={isIdDuplicate || (!editingStaffId && staffLimitReached)}
-                                    title={!editingStaffId && staffLimitReached ? staffLimitTitle : undefined}
-                                    className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl transition-all ${isIdDuplicate || (!editingStaffId && staffLimitReached) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-crm-600 hover:bg-crm-700 text-white shadow-crm-200 active:scale-[0.98]'}`}
+                                    disabled={isIdDuplicate}
+                                    className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl transition-all ${isIdDuplicate ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-crm-600 hover:bg-crm-700 text-white shadow-crm-200 active:scale-[0.98]'}`}
                                 >
                                     {editingStaffId ? 'Update Staff Account' : 'Create Staff Account'}
                                 </button>

@@ -3,6 +3,11 @@ import {
     formatTermsForWhatsApp,
     type QuoteTermsRecord,
 } from './quoteTerms';
+import {
+    formatAgencyBankDetailsPlainText,
+    hasAgencyBankDetails,
+    type AgencyBankDetails,
+} from './agencyBankDetails';
 
 const getDurationDays = (duration?: string) => {
     if (!duration) return 0;
@@ -120,6 +125,7 @@ export type BuildQuoteShareParams = {
     terms: QuoteTermsRecord | null;
     trackingId: string;
     format: 'whatsapp' | 'email';
+    bankDetails?: AgencyBankDetails | null;
 };
 
 export const buildQuoteShareMessage = ({
@@ -130,6 +136,7 @@ export const buildQuoteShareMessage = ({
     terms,
     trackingId,
     format,
+    bankDetails,
 }: BuildQuoteShareParams): string => {
     const customerName = quote.customer || 'Traveler';
     const firstName = customerName.split(' ')[0];
@@ -141,6 +148,11 @@ export const buildQuoteShareMessage = ({
         .join(', ');
     const termsSection =
         format === 'whatsapp' ? formatTermsForWhatsApp(terms) : formatTermsForEmail(terms);
+    const bankSection = hasAgencyBankDetails(bankDetails)
+        ? format === 'whatsapp'
+            ? `*Bank details:*\n${formatAgencyBankDetailsPlainText(bankDetails)}`
+            : `Bank details:\n${formatAgencyBankDetailsPlainText(bankDetails)}`
+        : '';
 
     const isWa = format === 'whatsapp';
 
@@ -164,6 +176,7 @@ export const buildQuoteShareMessage = ({
             ? `💰 *Total VIP Investment:* *₹${quoteTotal.toLocaleString('en-IN')}*\n_(Includes all premier accommodations, fees, and taxes)_`
             : `Total investment: ₹${quoteTotal.toLocaleString('en-IN')}\n(Includes accommodations, fees, and taxes as quoted.)`,
         termsSection || '',
+        bankSection,
         isWa
             ? "Let me know if you'd like to secure this package before availability changes, or if you'd like to customize anything to make it even more perfect. 🥂"
             : "Let me know if you'd like to secure this package or customize anything further.",

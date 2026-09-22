@@ -56,7 +56,11 @@ export const buildNightPricesForStay = (
     return Array.from({ length: safeNights }, (_, i) => {
         const prev = existing?.[i];
         const rate = Number(prev?.rate) > 0 ? Number(prev?.rate) : catalog;
-        const given = Number(prev?.given) > 0 ? Number(prev!.given) : rate;
+        // Preserve an explicit given amount (including 0) once the night row exists.
+        const given =
+            prev != null && prev.given != null && Number.isFinite(Number(prev.given))
+                ? Math.max(0, Number(prev.given))
+                : rate;
         return {
             rate,
             given,
@@ -68,9 +72,11 @@ export const buildNightPricesForStay = (
 export const sumStayGivenTotal = (stay: { nights: number; nightPrices?: HotelNightPrice[] }): number => {
     const nights = Math.max(0, Number(stay.nights) || 0);
     if (!stay.nightPrices?.length || nights === 0) return 0;
-    return stay.nightPrices
-        .slice(0, nights)
-        .reduce((sum, np) => sum + (Number(np.given) || Number(np.rate) || 0), 0);
+    return stay.nightPrices.slice(0, nights).reduce((sum, np) => {
+        const given = Number(np.given);
+        if (Number.isFinite(given)) return sum + given;
+        return sum + (Number(np.rate) || 0);
+    }, 0);
 };
 
 const sumInclusionRows = (rows?: HotelNightInclusion[]): number =>
@@ -103,15 +109,47 @@ export const sumStayExtraBedTotal = (stay: {
     return beds * pricePerBedNight * nights;
 };
 
+/** Child with bed: count × price per night × stay nights. */
+export const sumStayChildWithBedTotal = (stay: {
+    nights?: number;
+    childWithBed?: number;
+    childWithBedPrice?: number;
+}): number => {
+    const count = Math.max(0, Number(stay.childWithBed) || 0);
+    const price = Math.max(0, Number(stay.childWithBedPrice) || 0);
+    const nights = Math.max(0, Number(stay.nights) || 0);
+    if (count === 0 || price === 0 || nights === 0) return 0;
+    return count * price * nights;
+};
+
+/** Child without bed: count × price per night × stay nights. */
+export const sumStayChildWithoutBedTotal = (stay: {
+    nights?: number;
+    childWithoutBed?: number;
+    childWithoutBedPrice?: number;
+}): number => {
+    const count = Math.max(0, Number(stay.childWithoutBed) || 0);
+    const price = Math.max(0, Number(stay.childWithoutBedPrice) || 0);
+    const nights = Math.max(0, Number(stay.nights) || 0);
+    if (count === 0 || price === 0 || nights === 0) return 0;
+    return count * price * nights;
+};
+
 export const sumStayHotelTotal = (stay: {
     nights: number;
     nightPrices?: HotelNightPrice[];
     extraBed?: number;
     extraBedPrice?: number;
+    childWithBed?: number;
+    childWithBedPrice?: number;
+    childWithoutBed?: number;
+    childWithoutBedPrice?: number;
     specialInclusions?: HotelNightInclusion[];
 }): number =>
     sumStayGivenTotal(stay) +
     sumStayExtraBedTotal(stay) +
+    sumStayChildWithBedTotal(stay) +
+    sumStayChildWithoutBedTotal(stay) +
     sumStaySpecialInclusionsTotal(stay);
 
 export const formatHotelNightDateLabel = (date: Date) => {
@@ -123,10 +161,31 @@ export const formatHotelNightDateLabel = (date: Date) => {
 export type HotelStaySelection = {
     hotelId?: string;
     nights?: number;
+    extraBed?: number;
+    extraBedPrice?: number;
+    childWithBed?: number;
+    childWithBedPrice?: number;
+    childWithoutBed?: number;
+    childWithoutBedPrice?: number;
 };
 
 export const getAssignedHotelNights = (stays: HotelStaySelection[]): number =>
     stays.reduce((sum, stay) => sum + Number(stay.nights || 0), 0);
+
+/** Extra beds require a per-bed nightly price before hotel selection can be confirmed. */
+export const stayMissingExtraBedPrice = (stay: HotelStaySelection): boolean => {
+    const beds = Math.max(0, Number(stay.extraBed) || 0);
+    if (beds <= 0) return false;
+    return !(Number(stay.extraBedPrice) > 0);
+};
+
+export const stayMissingChildBedPrice = (stay: HotelStaySelection): boolean => {
+    const withBed = Math.max(0, Number(stay.childWithBed) || 0);
+    if (withBed > 0 && !(Number(stay.childWithBedPrice) > 0)) return true;
+    const withoutBed = Math.max(0, Number(stay.childWithoutBed) || 0);
+    if (withoutBed > 0 && !(Number(stay.childWithoutBedPrice) > 0)) return true;
+    return false;
+};
 
 export const isHotelSelectionComplete = (
     stays: HotelStaySelection[],
@@ -140,6 +199,9 @@ export const isHotelSelectionComplete = (
 
     const hasIncompleteStays = stays.some((stay) => Number(stay.nights) > 0 && !stay.hotelId);
     if (hasIncompleteStays) return false;
+
+    if (stays.some(stayMissingExtraBedPrice)) return false;
+    if (stays.some(stayMissingChildBedPrice)) return false;
 
     return getAssignedHotelNights(stays) === requiredNights;
 };
@@ -164,6 +226,14 @@ export const getHotelSelectionIncompleteMessage = (
     const hasIncompleteStays = stays.some((stay) => Number(stay.nights) > 0 && !stay.hotelId);
     if (hasIncompleteStays) {
         return 'Every stay block with nights must have a hotel selected.';
+    }
+
+    if (stays.some(stayMissingExtraBedPrice)) {
+        return 'Please enter an extra bed price for every stay that includes extra beds.';
+    }
+
+    if (stays.some(stayMissingChildBedPrice)) {
+        return 'Please enter a price for every child with bed / without bed count you added.';
     }
 
     const assignedNights = getAssignedHotelNights(stays);

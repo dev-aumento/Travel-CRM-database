@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Globe, Building2 } from 'lucide-react';
+import { Globe, Building2, Landmark } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
 import {
     canManageAgencyProfile,
@@ -16,7 +16,8 @@ const TABS = [
     { id: 'notifications', label: 'Notifications' },
     { id: 'security', label: 'Security' },
     { id: 'integrations', label: 'Integrations' },
-    { id: 'system', label: 'System Management' }
+    { id: 'banking', label: 'Banking' },
+    { id: 'system', label: 'System Management' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -58,34 +59,66 @@ const Settings = () => {
 
     const [activeTab, setActiveTab] = useState<TabId>('general');
 
-    const persistedSettings = useMemo(() => ({
-        agencyName: settingsRecord?.agencyName || 'Travel Agency CRM',
-        logoUrl: settingsRecord?.logoUrl || '',
-        supportEmail: settingsRecord?.supportEmail || userEmail || 'hello@travelcrm.example.com',
-        agencyAddress: settingsRecord?.agencyAddress || 'A-502, Crystal Plaza, New Link Road, Andheri West, Mumbai, Maharashtra 400053',
-        currency: settingsRecord?.currency || DEFAULT_CURRENCY,
-        timezone: settingsRecord?.timezone || DEFAULT_TIMEZONE,
-        emailJsServiceId:
-            currentAgent?.emailJsServiceId ||
-            settingsRecord?.emailJsServiceId ||
-            '',
-        emailJsTemplateId:
-            currentAgent?.emailJsTemplateId ||
-            settingsRecord?.emailJsTemplateId ||
-            '',
-        emailJsPublicKey:
-            currentAgent?.emailJsPublicKey ||
-            settingsRecord?.emailJsPublicKey ||
-            '',
-    }), [settingsRecord, userEmail, currentAgent]);
+    const persistedSettings = useMemo(
+        () => ({
+            agencyName: settingsRecord?.agencyName || 'Travel Agency CRM',
+            logoUrl: settingsRecord?.logoUrl || '',
+            supportEmail:
+                settingsRecord?.supportEmail || userEmail || 'hello@travelcrm.example.com',
+            agencyAddress:
+                settingsRecord?.agencyAddress ||
+                'A-502, Crystal Plaza, New Link Road, Andheri West, Mumbai, Maharashtra 400053',
+            currency: settingsRecord?.currency || DEFAULT_CURRENCY,
+            timezone: settingsRecord?.timezone || DEFAULT_TIMEZONE,
+            emailJsServiceId:
+                currentAgent?.emailJsServiceId || settingsRecord?.emailJsServiceId || '',
+            emailJsTemplateId:
+                currentAgent?.emailJsTemplateId || settingsRecord?.emailJsTemplateId || '',
+            emailJsPublicKey:
+                currentAgent?.emailJsPublicKey || settingsRecord?.emailJsPublicKey || '',
+            accountNumber: settingsRecord?.accountNumber || '',
+            bankName: settingsRecord?.bankName || '',
+            branchName: settingsRecord?.branchName || '',
+            ifscCode: settingsRecord?.ifscCode || '',
+            gstDetails: settingsRecord?.gstDetails || '',
+        }),
+        [
+            settingsRecord?.id,
+            settingsRecord?.agencyName,
+            settingsRecord?.logoUrl,
+            settingsRecord?.supportEmail,
+            settingsRecord?.agencyAddress,
+            settingsRecord?.currency,
+            settingsRecord?.timezone,
+            settingsRecord?.emailJsServiceId,
+            settingsRecord?.emailJsTemplateId,
+            settingsRecord?.emailJsPublicKey,
+            settingsRecord?.accountNumber,
+            settingsRecord?.bankName,
+            settingsRecord?.branchName,
+            settingsRecord?.ifscCode,
+            settingsRecord?.gstDetails,
+            currentAgent?.emailJsServiceId,
+            currentAgent?.emailJsTemplateId,
+            currentAgent?.emailJsPublicKey,
+            userEmail,
+        ]
+    );
+
+    const persistedSnapshot = useMemo(
+        () => JSON.stringify(persistedSettings),
+        [persistedSettings]
+    );
 
     const [formState, setFormState] = useState(persistedSettings);
 
+    // Only rehydrate from saved settings when the saved values actually change —
+    // not when object identity churns on unrelated DB re-renders (which was clearing inputs on blur).
     useEffect(() => {
-        setFormState(persistedSettings);
-    }, [persistedSettings]);
+        setFormState(JSON.parse(persistedSnapshot));
+    }, [persistedSnapshot]);
 
-    const hasChanges = JSON.stringify(formState) !== JSON.stringify(persistedSettings);
+    const hasChanges = JSON.stringify(formState) !== persistedSnapshot;
 
     const handleFieldChange = (field: keyof typeof formState, value: string) => {
         setFormState(prev => ({ ...prev, [field]: value }));
@@ -395,6 +428,96 @@ const Settings = () => {
                                         onChange={(e) => handleFieldChange('emailJsPublicKey', e.target.value)}
                                         placeholder="Your EmailJS public key"
                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ) : activeTab === 'banking' ? (
+                        <div className="space-y-6 max-w-xl">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                    <Landmark size={20} className="text-crm-500" />
+                                    Banking Details
+                                </h3>
+                                <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                                    Store your agency bank account and GST details for invoices and settlements.
+                                </p>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                                        Account Number
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formState.accountNumber}
+                                        onChange={(e) =>
+                                            handleFieldChange('accountNumber', e.target.value)
+                                        }
+                                        placeholder="e.g. 123456789012"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-crm-500/5 focus:border-crm-500 outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                                        Bank Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formState.bankName}
+                                        onChange={(e) =>
+                                            handleFieldChange('bankName', e.target.value)
+                                        }
+                                        placeholder="e.g. HDFC Bank"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-crm-500/5 focus:border-crm-500 outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                                        Branch Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formState.branchName}
+                                        onChange={(e) =>
+                                            handleFieldChange('branchName', e.target.value)
+                                        }
+                                        placeholder="e.g. Andheri West"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-crm-500/5 focus:border-crm-500 outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                                        IFSC Code
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formState.ifscCode}
+                                        onChange={(e) =>
+                                            handleFieldChange(
+                                                'ifscCode',
+                                                e.target.value.toUpperCase()
+                                            )
+                                        }
+                                        placeholder="e.g. HDFC0001234"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-mono font-medium tracking-wider focus:ring-4 focus:ring-crm-500/5 focus:border-crm-500 outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                                        GST Number
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formState.gstDetails}
+                                        onChange={(e) =>
+                                            handleFieldChange(
+                                                'gstDetails',
+                                                e.target.value.toUpperCase()
+                                            )
+                                        }
+                                        placeholder="e.g. 27AAAAA0000A1Z5"
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-mono font-medium tracking-wider focus:ring-4 focus:ring-crm-500/5 focus:border-crm-500 outline-none transition-all"
                                     />
                                 </div>
                             </div>
