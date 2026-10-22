@@ -164,6 +164,8 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
             )
         );
     }, 0);
+    const vehicleTotal = Math.max(0, Number(vehiclePrice) || 0);
+    const itineraryGrandTotal = itineraryActivityTotal + vehicleTotal;
     const hotelStayTotal = validStays.reduce(
         (sum, stay) => sum + Math.max(0, sumStayHotelTotal(stay as any) || 0),
         0
@@ -330,20 +332,16 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
             </ReviewSection>
 
             <ReviewSection title="Itinerary" icon={<MapPin size={16} />} step="itinerary" onEditStep={onEditStep}>
-                {(transportation || (vehiclePrice != null && vehiclePrice > 0)) ? (
-                    <p className="text-xs font-semibold text-slate-600 mb-3">
-                        {transportation ? (
-                            <>
-                                Travel vehicle: <span className="text-crm-700 font-black">{transportation}</span>
-                            </>
-                        ) : null}
-                        {vehiclePrice != null && vehiclePrice > 0 ? (
-                            <span className={transportation ? ' ml-1' : ''}>
-                                {transportation ? '· ' : ''}
-                                {formatInr(vehiclePrice)}
-                            </span>
-                        ) : null}
-                    </p>
+                {(transportation || vehicleTotal > 0) ? (
+                    <div className="flex items-center justify-between gap-3 mb-3 px-4 py-2.5 rounded-xl border border-slate-100 bg-slate-50/80">
+                        <span className="text-xs font-semibold text-slate-600">
+                            Travel vehicle:{' '}
+                            <span className="text-crm-700 font-black">{transportation || 'Vehicle'}</span>
+                        </span>
+                        <span className="text-xs font-black text-crm-600 shrink-0">
+                            {formatInr(vehicleTotal)}
+                        </span>
+                    </div>
                 ) : null}
                 {itinerary.length === 0 ? (
                     <p className="text-sm text-slate-400 italic">No itinerary days yet.</p>
@@ -392,13 +390,13 @@ const QuoteBuilderReviewPreview: React.FC<Props> = ({
                         {itinerary.length} day{itinerary.length !== 1 ? 's' : ''} · {activityCount} activit
                         {activityCount === 1 ? 'y' : 'ies'}
                     </p>
-                    {activityCount > 0 && (
+                    {(activityCount > 0 || vehicleTotal > 0) && (
                         <div className="text-right shrink-0">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                Itinerary total
+                                Itinerary total{vehicleTotal > 0 ? ' (incl. vehicle)' : ''}
                             </p>
                             <p className="text-sm font-black text-crm-700">
-                                {formatInr(itineraryActivityTotal)}
+                                {formatInr(itineraryGrandTotal)}
                             </p>
                         </div>
                     )}

@@ -152,6 +152,7 @@ const resolvePricing = (source: any, fallback: any, db: any) => {
                     : fallback?.needFlight !== false,
             customHotelRate: source?.customHotelRate ?? fallback?.customHotelRate,
             customFlightTotal: source?.customFlightTotal ?? fallback?.customFlightTotal,
+            vehiclePrice: source?.vehiclePrice ?? fallback?.vehiclePrice,
             tripMode: resolveTripMode(source || fallback),
         },
         db?.customPresets?.data || [],
@@ -463,6 +464,7 @@ export const buildQuoteEstimateBuckets = (
         (customHotels ? pricing.breakdown.hotel : 0) +
         (pricing.breakdown.hotelExtras || 0) +
         activityTotal +
+        (pricing.breakdown.vehicle || 0) +
         additional +
         (customHotels ? 0 : pricing.breakdown.transfer) +
         (needFlight

@@ -75,6 +75,15 @@ export const buildQuoteLineItems = (params: {
         price: pricing.breakdown.activity,
         total: pricing.breakdown.activity,
     });
+    if ((pricing.breakdown.vehicle || 0) > 0) {
+        items.push({
+            desc: 'Travel Vehicle',
+            sub: 'Vehicle for itinerary activities',
+            qty: '1',
+            price: pricing.breakdown.vehicle || 0,
+            total: pricing.breakdown.vehicle || 0,
+        });
+    }
     if ((pricing.breakdown.transfer || 0) > 0) {
         items.push({
             desc: 'Transfers',

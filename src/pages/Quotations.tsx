@@ -1151,6 +1151,7 @@ const Quotations = () => {
             hotelMealPlan: formHotelMealPlan,
             needFlight: formNeedFlight,
             customFlightTotal: customFlightTotal || undefined,
+            vehiclePrice: formVehiclePrice,
             tripMode,
         }, customPresets, db?.hotels?.data);
         const preset = pricing.preset;
@@ -1198,6 +1199,7 @@ const Quotations = () => {
             hotelTier: formHotelTier,
             hotelStays: hotelStaysForQuote,
             itinerary: formItinerary,
+            vehiclePrice: formVehiclePrice,
             additionalActivities: normalizeAdditionalActivities(
                 formAdditionalActivities.filter((row) => row.title.trim())
             ),
@@ -2536,9 +2538,10 @@ const Quotations = () => {
             hotelMealPlan: formHotelMealPlan,
             needFlight: formNeedFlight,
             customFlightTotal: customFlightTotal || undefined,
+            vehiclePrice: isCreating ? formVehiclePrice : undefined,
             tripMode,
         }, customPresets, db?.hotels?.data);
-    }, [effectivePresetId, formAdults, formKids, formKidsAges, isCreating, formItinerary, customPresets, formFlightMeal, formHotelTier, formHotelId, formHotelStays, customHotelRate, formHotelMealPlan, formNeedFlight, customFlightTotal, tripMode, db?.hotels?.data]);
+    }, [effectivePresetId, formAdults, formKids, formKidsAges, isCreating, formItinerary, customPresets, formFlightMeal, formHotelTier, formHotelId, formHotelStays, customHotelRate, formHotelMealPlan, formNeedFlight, customFlightTotal, formVehiclePrice, tripMode, db?.hotels?.data]);
 
     const hasUnsavedReviewDraft = useMemo(() => {
         if (!isCreating || editingQuoteId || builderStep !== 'review') return false;
@@ -2568,6 +2571,7 @@ const Quotations = () => {
             itinerary: formItinerary,
             transportation: itineraryVehicleLabel || undefined,
             vehicleType: formVehicleType || undefined,
+            vehiclePrice: formVehiclePrice,
             additionalActivities: normalizeAdditionalActivities(
                 formAdditionalActivities.filter((row) => row.title.trim())
             ),
@@ -2588,6 +2592,7 @@ const Quotations = () => {
             formItinerary,
             itineraryVehicleLabel,
             formVehicleType,
+            formVehiclePrice,
             formAdditionalActivities,
             formAdditionalServiceCharge,
             customFlightTotal,
@@ -2603,16 +2608,22 @@ const Quotations = () => {
         return getLiveQuoteEstimateDisplay(livePrice, formQuoteSnapshot, db);
     }, [isCreating, selectedQuote, db, livePrice, formQuoteSnapshot]);
 
+    /** Quote being revised — looked up by editingQuoteId so it survives selection changes. */
+    const editingParentQuote = useMemo(
+        () => findQuoteById(editingQuoteId),
+        [findQuoteById, editingQuoteId]
+    );
+
     const nextEditVersion = useMemo(() => {
-        if (!editingQuoteId || !selectedQuote) return null;
-        const quoteLead = findLeadForQuote(selectedQuote, leads) || selectedQuote;
+        if (!editingParentQuote) return null;
+        const quoteLead = findLeadForQuote(editingParentQuote, leads) || editingParentQuote;
         const allRelevantQuotes = getQuotesForLeadVersioning(
             db?.quotations?.data || [],
             quoteLead,
             leads
         );
-        return resolveChildQuoteVersion(selectedQuote, allRelevantQuotes);
-    }, [editingQuoteId, selectedQuote, db?.quotations?.data, leads]);
+        return resolveChildQuoteVersion(editingParentQuote, allRelevantQuotes);
+    }, [editingParentQuote, db?.quotations?.data, leads]);
 
     const availableTermsOptions = useMemo(
         () =>
@@ -2824,9 +2835,9 @@ const Quotations = () => {
     };
 
     const handleUpdateQuote = () => {
-        if (!editingQuoteId || !selectedQuote) return;
+        if (!editingParentQuote) return;
 
-        const parentQuote = selectedQuote;
+        const parentQuote = editingParentQuote;
         // Quote issue/created date (not trip departure — that lives in departureDate)
         const dateDisplay = new Date().toLocaleDateString('en-US', {
             month: 'short',
@@ -2864,6 +2875,7 @@ const Quotations = () => {
             hotelMealPlan: formHotelMealPlan,
             needFlight: formNeedFlight,
             customFlightTotal: customFlightTotal || undefined,
+            vehiclePrice: formVehiclePrice,
             tripMode,
         }, customPresets, db?.hotels?.data);
 
@@ -2892,6 +2904,7 @@ const Quotations = () => {
             hotelTier: formHotelTier,
             hotelStays: hotelStaysForQuote,
             itinerary: formItinerary,
+            vehiclePrice: formVehiclePrice,
             additionalActivities: normalizeAdditionalActivities(
                 formAdditionalActivities.filter((row) => row.title.trim())
             ),
@@ -3032,13 +3045,19 @@ const Quotations = () => {
     };
 
     const handleManualFinalize = () => {
-        if (editingQuoteId) {
+        if (editingParentQuote) {
             handleUpdateQuote();
             return;
         }
+        // Stale edit id (quote no longer exists) — save as a brand-new quote instead of doing nothing.
+        if (editingQuoteId) setEditingQuoteId(null);
 
         const draft = buildCurrentQuoteOption();
         if (!draft) return;
+        if (livePrice.total <= 0) {
+            alert('The quote total is 0. Please complete the hotel and itinerary pricing before saving.');
+            return;
+        }
 
         const datesFormatted = draft.date || '';
         const pricing = {
@@ -3740,6 +3759,8 @@ const Quotations = () => {
                                         <button
                                             onClick={() => {
                                                 setIterationParent(null);
+                                                setEditingQuoteId(null);
+                                                setEditingQuote(null);
                                                 setFormCustomer(lead.name);
                                                 setLeadContext(lead);
                                                 if (lead.trackingId || lead.tripId) {
@@ -3854,6 +3875,8 @@ const Quotations = () => {
                                             <button
                                                 onClick={() => {
                                                     setIterationParent(latestQuote);
+                                                    setEditingQuoteId(null);
+                                                    setEditingQuote(null);
                                                     setFormCustomer(lead.name);
                                                     setLeadContext(lead);
                                                     setFormTripId(
@@ -6668,10 +6691,9 @@ const Quotations = () => {
                                     <button
                                         type="button"
                                         onClick={handleManualFinalize}
-                                        disabled={!editingQuoteId && !hasUnsavedReviewDraft}
                                         className="flex-1 md:flex-none px-8 py-3 bg-crm-600 hover:bg-crm-700 text-white shadow-lg shadow-crm-200 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {editingQuoteId
+                                        {editingParentQuote
                                             ? `Save as v${nextEditVersion || '…'}`
                                             : 'Finish and Send'}
                                     </button>

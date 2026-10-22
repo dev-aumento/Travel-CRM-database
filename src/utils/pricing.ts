@@ -276,6 +276,8 @@ export interface PricingInput {
     hotelMealPlan?: string;
     needFlight?: boolean;
     customFlightTotal?: number;
+    /** Travel vehicle for itinerary activities (flat package rate). */
+    vehiclePrice?: number;
     /** package = Use Template; custom = Build Custom Plan */
     tripMode?: 'package' | 'custom';
 }
@@ -298,6 +300,7 @@ export interface PricingResult {
         visa: number;
         activity: number;
         transfer: number;
+        vehicle?: number;
         meals?: number;
         flightMeals?: number;
         hotelMeals?: number;
@@ -504,6 +507,7 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
     const finalActivityTotal = hasChosenActivities
         ? Math.round(totalActivityCharge)
         : Math.round(((preset.activityCost || 0) / 2) * travelerFactor);
+    const vehicleTotal = Math.round(Math.max(0, Number(input.vehiclePrice) || 0));
 
     // Flight Meal Logic
     const flightMealChargePerPerson = (input.needFlight !== false && input.flightMeal?.optIn) ? (MEAL_RATES[input.flightMeal.type] || 0) : 0;
@@ -524,6 +528,7 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
         finalFlightTotal +
         visaTotal +
         finalActivityTotal +
+        vehicleTotal +
         transferTotal +
         flightMealTotal +
         hotelMealTotal;
@@ -557,6 +562,7 @@ export function calculateQuote(input: PricingInput, customPresets?: PackagePrese
             visa: visaTotal,
             activity: finalActivityTotal,
             transfer: transferTotal,
+            vehicle: vehicleTotal,
             meals: flightMealTotal + hotelMealTotal,
             flightMeals: flightMealTotal,
             hotelMeals: hotelMealTotal,
