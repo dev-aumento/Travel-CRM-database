@@ -1,4 +1,5 @@
 import { getAgentPlanExpiryDisplay, isMainAgencyAgent, parseAgentDate } from './agentPlan';
+import { getPlanPeriodLabel, getPlanPriceInr, normalizeBillingCycle } from './planPricing';
 
 export type SubscriptionSettlementStatus = 'paid' | 'trial' | 'unpaid';
 
@@ -46,7 +47,7 @@ export const hasAgentPurchasedPlan = (agent: any): boolean => {
 export const getAgentSubscriptionPayment = (agent: any, planCatalog: any[] = []): AgentSubscriptionPayment => {
     const planName = agent?.plan || 'Lite';
     const planMeta = planCatalog.find((p: any) => p.name === planName);
-    const total = parsePlanPrice(planMeta?.price);
+    const total = planMeta ? getPlanPriceInr(planMeta, normalizeBillingCycle(agent?.billingCycle)) : 0;
     const now = Date.now();
     const expiry = parseAgentDate(agent?.planExpiresAt);
     const trialEnd = parseAgentDate(agent?.trialEndsAt);
@@ -113,7 +114,9 @@ export const buildAgentSubscriptionRows = (
                 id: `SUB-${agent.id}`,
                 agent,
                 planName,
-                period: planMeta?.period || '/month',
+                period: planMeta
+                    ? getPlanPeriodLabel(planMeta, normalizeBillingCycle(agent.billingCycle))
+                    : '/month',
                 purchasedAt,
                 expiresLabel: `${expiry.label}: ${expiry.text}`,
                 payment,

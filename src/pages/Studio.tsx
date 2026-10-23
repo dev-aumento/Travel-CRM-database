@@ -31,6 +31,18 @@ import {
 import { useDatabase } from '../context/DatabaseContext';
 import { packagePresets } from '../utils/pricing';
 import { sortPlansByPriceAsc } from '../utils/agentPlan';
+import {
+    convertPlanInrToUsd,
+    formatInrPlanPrice,
+    formatUsdPlanPrice,
+    getPlanPeriodLabel,
+    getPlanPriceInr,
+    getPlatformInrPerUsd,
+    getYearlySavingsPercent,
+    isFreePlan,
+    useInrUsdRate,
+} from '../utils/planPricing';
+import { PLAN_FEATURES, getPlanFeatureLabels } from '../utils/planFeatures';
 
 const TAB_SINGULAR: Record<string, string> = {
     hotels: 'Hotel',
@@ -40,6 +52,8 @@ const TAB_SINGULAR: Record<string, string> = {
 };
 
 type StudioTab = 'hotels' | 'activities' | 'presets' | 'plans';
+
+const PLAN_FEATURE_CATALOG: string[] = PLAN_FEATURES.map((f) => f.label);
 
 const planIcon = (name: string) => {
     if (name === 'Lite') return <Zap className="text-blue-500" size={22} />;
@@ -142,6 +156,44 @@ const Studio = () => {
 
     const [showModal, setShowModal] = useState(false);
     const [editingItem, setEditingItem] = useState<any>(null);
+    const [planInrDraft, setPlanInrDraft] = useState('');
+    const {
+        rate: usdPerInr,
+        fetchedAt: rateFetchedAt,
+        loading: rateLoading,
+        isManual: isManualRate,
+    } = useInrUsdRate(getPlatformInrPerUsd(db));
+    const formatLiveUsd = (amountInInr: number) =>
+        usdPerInr == null
+            ? rateLoading ? 'Fetching rate…' : 'Rate unavailable'
+            : formatUsdPlanPrice(convertPlanInrToUsd(amountInInr, usdPerInr));
+    const rateNote = !usdPerInr
+        ? ''
+        : isManualRate
+          ? `1 USD = ₹${(1 / usdPerInr).toFixed(2)} · set in Platform Settings`
+          : `1 USD = ₹${(1 / usdPerInr).toFixed(2)} · live rate, updated ${new Date(rateFetchedAt || Date.now()).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}`;
+
+    const [planYearlyInrDraft, setPlanYearlyInrDraft] = useState('');
+    const planYearlySavings = getYearlySavingsPercent({
+        priceInr: Number(planInrDraft) || 0,
+        priceYearlyInr: Number(planYearlyInrDraft) || 0,
+    });
+
+    const [planFeaturesDraft, setPlanFeaturesDraft] = useState<string[]>([]);
+    const planFeatureOptions = PLAN_FEATURE_CATALOG;
+
+    const togglePlanFeature = (feature: string) =>
+        setPlanFeaturesDraft((prev) =>
+            prev.includes(feature) ? prev.filter((f) => f !== feature) : [...prev, feature]
+        );
+
+    useEffect(() => {
+        if (!showModal) return;
+        setPlanInrDraft(editingItem ? String(getPlanPriceInr(editingItem, 'monthly')) : '');
+        setPlanYearlyInrDraft(editingItem ? String(getPlanPriceInr(editingItem, 'yearly')) : '');
+        // Features saved before the catalog existed are dropped; only real CRM features stay ticked
+        setPlanFeaturesDraft(getPlanFeatureLabels(editingItem));
+    }, [showModal, editingItem]);
 
     const filteredData = useMemo(() => {
         const query = searchQuery.toLowerCase();
@@ -265,19 +317,26 @@ const Studio = () => {
                 addRecord('customPresets', presetObj);
             }
         } else if (activeTab === 'plans') {
+            if (planFeaturesDraft.length === 0) {
+                alert('Select at least one feature for this plan.');
+                return;
+            }
+            const priceInr = Math.max(0, Math.round(Number(data.priceInr) || 0));
+            const priceYearlyInr = Math.max(0, Math.round(Number(data.priceYearlyInr) || 0));
             const planObj = {
                 id: editingItem?.id || getNextId('plans', 'PLAN'),
                 name: String(data.name || '').trim(),
                 tagline: String(data.tagline || '').trim(),
-                price: String(data.price || '').trim(),
-                period: String(data.period || '').trim(),
+                // `price` keeps the monthly INR display string for sorting
+                price: formatInrPlanPrice(priceInr),
+                priceInr,
+                priceYearlyInr,
+                // Paid plans renew (monthly or yearly per agent); free plans never expire
+                period: priceInr === 0 && priceYearlyInr === 0 ? '/forever' : '/month',
                 staffLimit: Number(data.staffLimit) || 0,
                 subAgentLimit: Number(data.subAgentLimit) || 0,
-                features: String(data.features || '')
-                    .split('\n')
-                    .map((f) => f.trim())
-                    .filter(Boolean)
-                    .join(','),
+                // Saved in checklist order so plan cards list features consistently
+                features: planFeatureOptions.filter((f) => planFeaturesDraft.includes(f)).join(','),
             };
             if (editingItem) updateRecord('plans', editingItem.id, planObj);
             else addRecord('plans', planObj);
@@ -564,9 +623,18 @@ const Studio = () => {
                                         </div>
                                         <h3 className="text-lg md:text-xl font-black text-slate-800 mb-1 truncate">{item.name}</h3>
                                         <p className="text-xs text-slate-500 font-medium mb-3 line-clamp-2">{item.tagline}</p>
-                                        <div className="flex items-baseline gap-1 mb-3 min-w-0">
-                                            <span className="text-lg md:text-xl font-black text-slate-900 truncate">{item.price}</span>
-                                            <span className="text-xs font-bold text-slate-400 shrink-0">{item.period}</span>
+                                        <div className="space-y-1 mb-3" title={rateNote}>
+                                            {(isFreePlan(item) ? (['monthly'] as const) : (['monthly', 'yearly'] as const)).map((cycle) => (
+                                                <div key={cycle} className="flex items-baseline gap-1.5 min-w-0">
+                                                    <span className="text-lg md:text-xl font-black text-slate-900 truncate">
+                                                        {formatInrPlanPrice(getPlanPriceInr(item, cycle))}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-slate-400 shrink-0">{getPlanPeriodLabel(item, cycle)}</span>
+                                                    <span className="text-xs font-bold text-slate-500 truncate">
+                                                        · {formatLiveUsd(getPlanPriceInr(item, cycle))}
+                                                    </span>
+                                                </div>
+                                            ))}
                                         </div>
                                         <div className="grid grid-cols-2 gap-2 mb-3">
                                             <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
@@ -582,25 +650,27 @@ const Studio = () => {
                                                 <p className="text-xs font-bold text-slate-800">∞</p>
                                             </div>
                                         </div>
-                                        <ul className="space-y-1.5 border-t border-slate-100 pt-3">
-                                            {(String(item.features || '')
-                                                .split(',')
-                                                .filter(Boolean)
-                                                .slice(0, 4) as string[]).map((feature: string) => (
-                                                <li
-                                                    key={feature}
-                                                    className="text-[11px] text-slate-600 font-medium flex items-start gap-2"
-                                                >
-                                                    <CheckCircle2 size={12} className="text-emerald-500 shrink-0 mt-0.5" />
-                                                    <span className="line-clamp-1">{feature.trim()}</span>
-                                                </li>
-                                            ))}
-                                            {String(item.features || '').split(',').filter(Boolean).length > 4 && (
-                                                <li className="text-[10px] font-bold text-crm-600 uppercase tracking-widest">
-                                                    + more features
-                                                </li>
-                                            )}
-                                        </ul>
+                                        <div className="border-t border-slate-100 pt-3">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                                {getPlanFeatureLabels(item).length} of {PLAN_FEATURE_CATALOG.length} features
+                                            </p>
+                                            <ul className="space-y-1.5">
+                                                {getPlanFeatureLabels(item).map((feature) => (
+                                                    <li
+                                                        key={feature}
+                                                        className="text-[11px] text-slate-600 font-medium flex items-start gap-2"
+                                                    >
+                                                        <CheckCircle2 size={12} className="text-emerald-500 shrink-0 mt-0.5" />
+                                                        <span className="line-clamp-1">{feature}</span>
+                                                    </li>
+                                                ))}
+                                                {getPlanFeatureLabels(item).length === 0 && (
+                                                    <li className="text-[11px] font-bold text-amber-600">
+                                                        No features selected yet — edit this plan to choose them.
+                                                    </li>
+                                                )}
+                                            </ul>
+                                        </div>
                                     </>
                                 )}
 
@@ -669,7 +739,7 @@ const Studio = () => {
             {/* Editor Modal */}
             {showModal && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[2000] flex items-center justify-center p-4 overflow-hidden animate-in fade-in duration-300">
-                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300 border border-slate-200">
+                    <div className={`bg-white rounded-[2rem] shadow-2xl w-full ${(activeTab === 'plans' || isAdmin) ? 'max-w-3xl' : 'max-w-xl'} overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300 border border-slate-200`}>
                         <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                             <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">
                                 {editingItem ? <Edit2 className="text-crm-500" /> : <Plus className="text-crm-500" />}
@@ -798,32 +868,44 @@ const Studio = () => {
                                                 placeholder="Short description for agents"
                                             />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                                    Price
-                                                </label>
-                                                <input
-                                                    name="price"
-                                                    defaultValue={editingItem?.price}
-                                                    required
-                                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none"
-                                                    placeholder="₹1,999"
-                                                />
+                                        {([
+                                            { cycle: 'monthly', label: 'Monthly', name: 'priceInr', value: planInrDraft, setValue: setPlanInrDraft, placeholder: '1999' },
+                                            { cycle: 'yearly', label: 'Yearly', name: 'priceYearlyInr', value: planYearlyInrDraft, setValue: setPlanYearlyInrDraft, placeholder: '19999' },
+                                        ] as const).map((row) => (
+                                            <div key={row.cycle} className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                                        {row.label} Price (INR ₹) — India
+                                                    </label>
+                                                    <input
+                                                        name={row.name}
+                                                        type="number"
+                                                        min={0}
+                                                        step={1}
+                                                        value={row.value}
+                                                        onChange={(e) => row.setValue(e.target.value)}
+                                                        required
+                                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none"
+                                                        placeholder={row.placeholder}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                                        {row.label} Price (USD $) — Outside India
+                                                    </label>
+                                                    <div className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-2xl text-sm font-bold text-slate-600">
+                                                        {formatLiveUsd(Number(row.value) || 0)}
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                                    Billing Period
-                                                </label>
-                                                <input
-                                                    name="period"
-                                                    defaultValue={editingItem?.period}
-                                                    required
-                                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none"
-                                                    placeholder="/month or /forever"
-                                                />
-                                            </div>
-                                        </div>
+                                        ))}
+                                        <p className="text-[10px] text-slate-400 font-medium ml-1 -mt-2">
+                                            USD is converted at the {isManualRate ? 'rate set in Platform Settings' : 'live rate'} and rounded to the nearest dollar. Set both prices to 0 for a free plan.
+                                            {rateNote && <><br />{rateNote}</>}
+                                            {planYearlySavings > 0 && (
+                                                <><br /><span className="text-emerald-600 font-bold">Yearly saves {planYearlySavings}% vs. paying monthly</span></>
+                                            )}
+                                        </p>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
@@ -852,17 +934,35 @@ const Studio = () => {
                                             </div>
                                         </div>
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                                Features (one per line)
-                                            </label>
-                                            <textarea
-                                                name="features"
-                                                defaultValue={String(editingItem?.features || '').replace(/,/g, '\n')}
-                                                rows={6}
-                                                required
-                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none resize-none"
-                                                placeholder="Full Lead Management&#10;Quotation Builder"
-                                            />
+                                            <div className="flex items-center justify-between gap-2 ml-1">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                                    Features Included
+                                                </label>
+                                                <span className="text-[10px] font-black text-crm-600 uppercase tracking-widest">
+                                                    {planFeaturesDraft.length} of {planFeatureOptions.length} selected
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                                                {planFeatureOptions.map((feature) => {
+                                                    const checked = planFeaturesDraft.includes(feature);
+                                                    return (
+                                                        <label
+                                                            key={feature}
+                                                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${checked ? 'bg-white border-crm-200 shadow-sm' : 'border-transparent hover:bg-white/70'}`}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                onChange={() => togglePlanFeature(feature)}
+                                                                className="w-4 h-4 accent-crm-600 shrink-0 cursor-pointer"
+                                                            />
+                                                            <span className={`text-sm font-bold ${checked ? 'text-slate-800' : 'text-slate-500'}`}>
+                                                                {feature}
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     </>
                                 )}

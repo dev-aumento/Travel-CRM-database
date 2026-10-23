@@ -38,6 +38,7 @@ import {
     validateLocalPhone,
 } from '../utils/countryPhoneData';
 import PermissionSelect from '../components/PermissionSelect';
+import { usePlanFeatures } from '../utils/planFeatures';
 import {
     ALL_PERMISSIONS,
     type PermissionKey,
@@ -228,6 +229,7 @@ const MainAgentCard = ({
 
 const TravelAgent = () => {
     const { db, addRecord, updateRecord, deleteRecord, getNextId } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
     const [searchParams, setSearchParams] = useSearchParams();
     const userRole = localStorage.getItem('userRole');
     const userEmail = localStorage.getItem('userEmail');
@@ -422,6 +424,16 @@ const TravelAgent = () => {
             setActiveTab('staff');
         }
     }, [isSubAgentSession, userRole, activeTab]);
+
+    // Staff / sub-agent management are separate plan features; fall back to whichever tab the plan includes
+    useEffect(() => {
+        if (userRole === 'admin') return;
+        if (activeTab === 'sub-agents' && !hasPlanFeature('subAgents') && hasPlanFeature('teamStaff')) {
+            setActiveTab('staff');
+        } else if (activeTab === 'staff' && !hasPlanFeature('teamStaff') && hasPlanFeature('subAgents') && userRole === 'agent' && !isSubAgentSession) {
+            setActiveTab('sub-agents');
+        }
+    }, [activeTab, userRole, isSubAgentSession, hasPlanFeature]);
 
     const canManageStaffMember = useCallback(
         (member: any) => canSessionManageStaffMember(member, sessionAgentIdResolved, db),
@@ -805,7 +817,7 @@ const TravelAgent = () => {
                             <UserPlus size={14} /> Add Agent
                         </button>
                     )}
-                    {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && (
+                    {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && hasPlanFeature('subAgents') && (
                         <button
                             type="button"
                             onClick={openAddAgentModal}
@@ -814,7 +826,7 @@ const TravelAgent = () => {
                             <UserPlus size={14} /> Add Sub-Agent
                         </button>
                     )}
-                    {canManageStaffTeam && activeTab === 'staff' && (
+                    {canManageStaffTeam && activeTab === 'staff' && hasPlanFeature('teamStaff') && (
                         <button
                             type="button"
                             onClick={openAddStaffModal}
@@ -863,13 +875,15 @@ const TravelAgent = () => {
             <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl self-start max-w-full overflow-x-auto">
                 {userRole === 'agent' && (
                     <>
-                        {!isSubAgentSession && (
+                        {!isSubAgentSession && hasPlanFeature('subAgents') && (
                             <button onClick={() => setActiveTab('sub-agents')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'sub-agents' ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>My Agents</button>
                         )}
-                        <button onClick={() => setActiveTab('staff')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'staff' ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Staff Accounts</button>
+                        {hasPlanFeature('teamStaff') && (
+                            <button onClick={() => setActiveTab('staff')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'staff' ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Staff Accounts</button>
+                        )}
                     </>
                 )}
-                {canManageStaffTeam && userRole !== 'agent' && (
+                {canManageStaffTeam && userRole !== 'agent' && hasPlanFeature('teamStaff') && (
                     <button onClick={() => setActiveTab('staff')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'staff' ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Staff Accounts</button>
                 )}
             </div>

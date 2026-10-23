@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CreditCard, Calendar, CheckCircle2, Clock, X, Eye, FileText, Download, User, Building, Edit2, Plus, Mail, Phone, Ban, Hotel, Lock } from 'lucide-react';
 import DropdownChevron from '../components/DropdownChevron';
 import HotelVoucherSendModal from '../components/HotelVoucherSendModal';
+import { usePlanFeatures } from '../utils/planFeatures';
 import VisibleScrollArea from '../components/VisibleScrollArea';
 import { resolveBookingVoucherContext } from '../utils/hotelVoucherShare';
 import CancelTripModal, { type CancelTripTarget } from '../components/CancelTripModal';
@@ -155,7 +156,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                 </span>
                             )}
                         </div>
-                        {voucherContext && canEdit && (
+                        {voucherContext && canEdit && onSendHotelVoucher && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onSendHotelVoucher(bk); }}
                                 className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-700 bg-white p-1.5 rounded-md border border-emerald-200 shadow-sm text-emerald-600"
@@ -337,7 +338,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                         )}
                                     </div>
 
-                                    {voucherContext && canEdit && (
+                                    {voucherContext && canEdit && onSendHotelVoucher && (
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -350,7 +351,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                                         </button>
                                     )}
 
-                                    {canEdit && normalizePipelineStatus(bk.status) !== 'canceled' && (
+                                    {canEdit && onCancelTrip && normalizePipelineStatus(bk.status) !== 'canceled' && (
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -374,6 +375,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
 
 const Bookings = () => {
     const { db, updateRecord } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
     const { formatMoney } = useCurrency();
     const [searchParams] = useSearchParams();
     const [highlightedBookingId, setHighlightedBookingId] = useState('');
@@ -544,11 +546,13 @@ const Bookings = () => {
                     <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Bookings</h1>
                     <p className="text-slate-500 mt-1 text-sm">Confirmed leads only — appears here after a lead reaches Booking Confirmed in the pipeline.</p>
                 </div>
+                {hasPlanFeature('csvExport') && (
                 <div className="flex gap-3 shrink-0">
                     <button onClick={handleDownloadReport} className="btn-secondary flex items-center gap-2 whitespace-nowrap">
                         <Download size={18} /> Download Report
                     </button>
                 </div>
+                )}
             </div>
 
             <div className="flex-1 min-h-0 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
@@ -576,8 +580,8 @@ const Bookings = () => {
                                         updateRecord={updateRecord}
                                         canEdit={canEditBooking(bk, linkedLead)}
                                         onViewInvoice={setSelectedBooking}
-                                        onSendHotelVoucher={openHotelVoucherModal}
-                                        onCancelTrip={openCancelModal}
+                                        onSendHotelVoucher={hasPlanFeature('hotelVouchers') ? openHotelVoucherModal : undefined}
+                                        onCancelTrip={hasPlanFeature('tripCancellations') ? openCancelModal : undefined}
                                         isHighlighted={highlightedBookingId === bk.id}
                                     />
                                 );

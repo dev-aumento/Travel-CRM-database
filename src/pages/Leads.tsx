@@ -9,6 +9,7 @@ import CancelTripModal, { type CancelTripTarget } from '../components/CancelTrip
 import VisibleScrollArea from '../components/VisibleScrollArea';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDatabase } from '../context/DatabaseContext';
+import { usePlanFeatures } from '../utils/planFeatures';
 import { packagePresets, calculateQuote, parseTravelers, guessPresetFromDestination, parseDurationNights } from '../utils/pricing';
 import { sourceCountries, internationalAirports } from '../utils/aviationData';
 import { buildCountryOptions, resolveWorldCountryName } from '../utils/worldLocations';
@@ -1072,6 +1073,9 @@ const LeadCard = ({ lead, onDragStart, onEdit, onDelete, onCancel, isHighlighted
 
 const AgentLeadsView = () => {
     const { db, addRecord, updateRecord, deleteRecord, softDeleteLead, getNextId } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
+    const canFollowUp = hasPlanFeature('leadFollowUps');
+    const canCancelTrips = hasPlanFeature('tripCancellations');
     const userRole = localStorage.getItem('userRole');
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
@@ -1945,7 +1949,8 @@ const AgentLeadsView = () => {
             return;
         }
 
-        if (statusId === 'contacted' && !hasLeadHighlightOrFollowUp(lead)) {
+        // Follow-up notes are a plan feature; plans without it can move leads to Contacted freely
+        if (statusId === 'contacted' && canFollowUp && !hasLeadHighlightOrFollowUp(lead)) {
             window.alert(
                 'Add a lead highlight or follow-up note before moving this lead to Contacted.'
             );
@@ -2021,9 +2026,10 @@ const AgentLeadsView = () => {
                         {userRole === 'admin' ? 'Master Global Lead Control' :
                             'Agency Lead Pipeline & Performance'}
                         {' · '}
-                        {leads.length === (db?.leads?.data?.length || 0)
-                            ? `${leads.length} lead${leads.length === 1 ? '' : 's'} from database`
-                            : `${leads.length} of ${db?.leads?.data?.length || 0} leads (your agency scope)`}
+                        {/* Agents see only their agency's count (own + sub-agents + staff), never the CRM-wide total */}
+                        {userRole === 'admin'
+                            ? `${leads.length} lead${leads.length === 1 ? '' : 's'} across all agencies`
+                            : `${leads.length} lead${leads.length === 1 ? '' : 's'} in your agency`}
                     </p>
                     )}
                 </div>
@@ -2085,7 +2091,7 @@ const AgentLeadsView = () => {
                                                     onDragStart={handleDragStart}
                                                     onEdit={openEditModal}
                                                     onDelete={handleDeleteLead}
-                                                    onCancel={openCancelModal}
+                                                    onCancel={canCancelTrips ? openCancelModal : undefined}
                                                     isHighlighted={highlightedLeadId === lead.id}
                                                 />
                                             ))}
@@ -2134,7 +2140,7 @@ const AgentLeadsView = () => {
                                                 onDragStart={handleDragStart}
                                                 onEdit={openEditModal}
                                                 onDelete={handleDeleteLead}
-                                                onCancel={openCancelModal}
+                                                onCancel={canCancelTrips ? openCancelModal : undefined}
                                                 isHighlighted={highlightedLeadId === lead.id}
                                             />
                                         ))}
@@ -2303,7 +2309,7 @@ const AgentLeadsView = () => {
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex justify-end gap-2 transition-all duration-200">
-                                                    {lead.status !== 'canceled' && (
+                                                    {lead.status !== 'canceled' && canCancelTrips && (
                                                         <button onClick={() => openCancelModal(lead)} className="p-2 rounded-lg bg-white text-amber-600 hover:bg-amber-50 hover:border-amber-200 transition-all border border-amber-100 shadow-sm" title="Cancel Trip">
                                                             <Ban size={15} />
                                                         </button>
@@ -2629,6 +2635,7 @@ const AgentLeadsView = () => {
                                                 )}
                                             </div>
 
+                                            {canFollowUp && (
                                             <div className="md:col-span-12 relative group">
                                                 <input
                                                     type="text"
@@ -2639,10 +2646,11 @@ const AgentLeadsView = () => {
                                                 />
                                                 <Clock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-crm-500 transition-colors" />
                                             </div>
+                                            )}
                                         </div>
                                     </div>
 
-                                    {editingLead && (
+                                    {editingLead && canFollowUp && (
                                         <div className="w-full bg-slate-50/50 border border-slate-100 rounded-2xl p-4">
                                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
                                                 Lead Highlight / Follow-up Note History

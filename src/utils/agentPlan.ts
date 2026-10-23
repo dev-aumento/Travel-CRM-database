@@ -324,10 +324,14 @@ export const buildApprovalPlanFields = (agent: any, plans: any[] = []): Record<s
     const planName = agent?.plan || 'Lite';
     const planMeta = plans.find((p: any) => p.name === planName);
     const period = String(planMeta?.period || '');
+    const billingCycle = agent?.billingCycle === 'yearly' ? 'yearly' : 'monthly';
     const updates: Record<string, unknown> = {};
 
-    if (period.includes('month')) {
-        updates.planExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // Paid plans are stored with a recurring period ("/month"); free plans use "/forever"
+    if (period.includes('month') || period.includes('year')) {
+        const days = billingCycle === 'yearly' ? 365 : 30;
+        updates.planExpiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+        updates.billingCycle = billingCycle;
         updates.isTrial = false;
     } else if (agent?.isTrial) {
         updates.trialEndsAt =

@@ -15,6 +15,7 @@ import {
     resolveQuoteEmailSender,
 } from '../utils/quoteShareEmail';
 import { canManageAgencyProfile } from '../utils/databaseSync';
+import { usePlanFeatures } from '../utils/planFeatures';
 
 type Props = {
     context: BookingVoucherContext;
@@ -58,12 +59,15 @@ const HotelVoucherSendModal: React.FC<Props> = ({ context, db, onClose, onSent, 
         db
     );
 
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
+    const canSendFromAgency = hasPlanFeature('agencyEmail');
     const emailJsConfig = useMemo(() => {
+        if (!canSendFromAgency) return null;
         const agentRecord = (db?.travelAgents?.data || []).find(
             (a: any) => a.id === context.booking.agentId || a.email === context.booking.agentId
         );
         return resolveEmailJsConfig(agentRecord) || resolveEmailJsConfig(db?.settings?.data?.[0]);
-    }, [db, context.booking.agentId]);
+    }, [db, context.booking.agentId, canSendFromAgency]);
 
     const canSendViaApi = Boolean(
         emailJsConfig?.serviceId && emailJsConfig?.templateId && emailJsConfig?.publicKey

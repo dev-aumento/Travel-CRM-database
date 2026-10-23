@@ -22,6 +22,7 @@ import { PLATFORM_NAME } from '../../constants/platform';
 import { useDatabase } from '../../context/DatabaseContext';
 import { canManageAgencyProfile, findSessionUser, isMainAgencyOwnerSession, resolveAgencyBranding } from '../../utils/databaseSync';
 import { type PermissionKey, canAccessRoute, canAccessTeamRoute } from '../../utils/permissions';
+import { canAccessRouteOnPlan, usePlanFeatures } from '../../utils/planFeatures';
 
 const SIDEBAR_COLLAPSED_KEY = 'crm_sidebar_collapsed';
 
@@ -77,6 +78,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         sessionUserId,
     };
     const isMainAgencyOwner = isMainAgencyOwnerSession(userRole, sessionAgentId, db);
+    const { features: planFeatures } = usePlanFeatures();
     const sessionUser = findSessionUser(db, sessionScope);
     const isStaffOrSubAgentSession =
         userRole === 'staff' ||
@@ -129,6 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         if ('mainAgencyOnly' in item && item.mainAgencyOnly && !isMainAgencyOwner) {
             return false;
         }
+        if (!canAccessRouteOnPlan(planFeatures, item.path)) return false;
         if ('permission' in item && item.permission) {
             if (item.path === '/my-team') {
                 return canAccessTeamRoute(userRole, userPermissions, sessionUser?.type === 'subAgent');

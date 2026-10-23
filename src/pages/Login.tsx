@@ -409,12 +409,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
                                 <button type="submit" disabled={isLoading} className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] ${portalType === 'admin' ? 'bg-white text-slate-900 shadow-white/10' : 'bg-crm-600 text-white shadow-crm-200'}`}>
                                     {isLoading ? <Loader2 className="animate-spin" /> : <LogIn size={18} />} Authorized Entry
                                 </button>
-
-                                {portalType === 'admin' && (
-                                    <p className="text-center text-[11px] text-slate-500 pt-2">
-                                        Demo: admin@aumento.com / admin123
-                                    </p>
-                                )}
                                 
                                 {portalType === 'agent' && (
                                     <div className="space-y-4 pt-4">

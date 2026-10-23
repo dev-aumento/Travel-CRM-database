@@ -13,6 +13,7 @@ import {
 import { trackingIdsMatch } from './trackingId';
 import { parseDurationNights } from './pricing';
 import { quoteBelongsToLead } from './quoteActivities';
+import { getPlanFeatureKeys } from './planFeatures';
 
 export type AgencyBranding = {
     name: string;
@@ -1023,10 +1024,14 @@ export const resolveAgencyBranding = (
         mainAgent?.name ||
         fallbackName;
 
+    // A custom logo is part of the Agency Branding plan feature
+    const plan = (db?.plans?.data || []).find((p: any) => p.name === (mainAgent?.plan || 'Lite'));
+    const hasBranding = !plan || getPlanFeatureKeys(plan).has('agencyBranding');
+
     return {
         name,
         logo: name.charAt(0).toUpperCase() || 'T',
-        logoUrl: settings?.logoUrl || mainAgent?.avatar || '',
+        logoUrl: hasBranding ? settings?.logoUrl || mainAgent?.avatar || '' : '',
         settings,
         mainAgent,
     };

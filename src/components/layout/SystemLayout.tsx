@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar, { SIDEBAR_COLLAPSED_KEY } from './Sidebar';
 import Navbar from './Navbar';
 import PlanExpiryAlertBar from './PlanExpiryAlertBar';
@@ -19,21 +19,39 @@ const readCollapsedPreference = () => {
     }
 };
 
+/** Wide workspace pages where agents/staff get an icon-only sidebar automatically. */
+const AUTO_COLLAPSE_ROUTES = ['/leads', '/quotations', '/bookings'];
+
 const SystemLayout: React.FC<SystemLayoutProps> = ({ onLogout, userRole, userPermissions }) => {
+    const { pathname } = useLocation();
+    const isAutoCollapseRoute =
+        userRole !== 'admin' &&
+        AUTO_COLLAPSE_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+
     const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(readCollapsedPreference);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(
+        () => isAutoCollapseRoute || readCollapsedPreference()
+    );
+
+    // Collapse on Leads / Quotations / Bookings; restore the saved preference elsewhere
+    React.useEffect(() => {
+        setIsSidebarCollapsed(isAutoCollapseRoute || readCollapsedPreference());
+    }, [isAutoCollapseRoute]);
 
     const toggleSidebarCollapsed = React.useCallback(() => {
         setIsSidebarCollapsed((prev) => {
             const next = !prev;
-            try {
-                localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
-            } catch {
-                /* ignore */
+            // Toggling on an auto-collapse page is temporary and doesn't change the saved preference
+            if (!isAutoCollapseRoute) {
+                try {
+                    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+                } catch {
+                    /* ignore */
+                }
             }
             return next;
         });
-    }, []);
+    }, [isAutoCollapseRoute]);
 
     return (
         <div className="h-screen bg-slate-50 dark:bg-slate-950 flex overflow-hidden font-sans">

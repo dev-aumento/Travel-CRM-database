@@ -3,6 +3,7 @@ import { isTermsHtml, termsContentIsEmpty, termsHtmlToEmailInner } from './terms
 import { parseTravelers } from './pricing';
 import { formatMoneyAmount, getCurrencyCodeLabel } from './currency';
 import { resolveMainAgencyAgent } from './databaseSync';
+import { getAgencyPlanFeatures } from './planFeatures';
 import {
     formatAgencyBankDetailsLines,
     hasAgencyBankDetails,
@@ -580,10 +581,17 @@ export const resolveQuoteEmailSender = (
         userEmail,
     });
 
-    const emailJsConfig =
-        resolveEmailJsConfig(agent) ||
-        resolveEmailJsConfig(mainAgencyAgent) ||
-        resolveEmailJsConfig(settings);
+    // Sending straight from the agency address is a plan feature; otherwise the mail app is used
+    const canSendFromAgency = getAgencyPlanFeatures(db, {
+        sessionAgentId: mainAgencyAgent?.id || agent?.id || opts.currentAgentId || '',
+        userEmail,
+    }).has('agencyEmail');
+
+    const emailJsConfig = canSendFromAgency
+        ? resolveEmailJsConfig(agent) ||
+          resolveEmailJsConfig(mainAgencyAgent) ||
+          resolveEmailJsConfig(settings)
+        : null;
 
     return { fromEmail, fromName, emailJsConfig };
 };

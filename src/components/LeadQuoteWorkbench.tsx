@@ -100,10 +100,12 @@ type Props = {
     onSelectQuote: (quoteId: string) => void;
     onNewQuote: () => void;
     onEditQuote: () => void;
-    onShareWhatsApp: () => void;
-    onShareEmail: () => void;
+    /** Omitted when the agency's plan doesn't include quote sharing */
+    onShareWhatsApp?: () => void;
+    onShareEmail?: () => void;
     customerEmail?: string | null;
-    onPrint: () => void;
+    /** Omitted when the agency's plan doesn't include quotation PDFs */
+    onPrint?: () => void;
     onDeleteQuote?: () => void;
     onConvert?: (quote: any) => void;
     db: any;
@@ -282,6 +284,7 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                 <Edit3 size={14} className="inline mr-1" />
                                 Modify
                             </button>
+                            {onShareWhatsApp && (
                             <button
                                 type="button"
                                 onClick={onShareWhatsApp}
@@ -290,6 +293,8 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                 <Send size={14} className="inline mr-1" />
                                 WhatsApp
                             </button>
+                            )}
+                            {onShareEmail && (
                             <button
                                 type="button"
                                 onClick={onShareEmail}
@@ -303,6 +308,8 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                 <Mail size={14} className="inline mr-1" />
                                 Email
                             </button>
+                            )}
+                            {onPrint && (
                             <button
                                 type="button"
                                 onClick={onPrint}
@@ -311,6 +318,7 @@ const LeadQuoteWorkbench: React.FC<Props> = ({
                                 <Download size={14} className="inline mr-1" />
                                 PDF
                             </button>
+                            )}
                             {onDeleteQuote && (
                                 <button
                                     type="button"

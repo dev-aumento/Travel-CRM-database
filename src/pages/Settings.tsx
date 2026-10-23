@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Globe, Building2, Landmark } from 'lucide-react';
+import { Globe, Building2, Landmark, DollarSign } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
 import {
     canManageAgencyProfile,
@@ -9,6 +9,8 @@ import {
 } from '../utils/databaseSync';
 import { CURRENCY_OPTIONS, DEFAULT_CURRENCY } from '../utils/currency';
 import DropdownChevron from '../components/DropdownChevron';
+import PlanFeatureLocked from '../components/PlanFeatureLocked';
+import { usePlanFeatures } from '../utils/planFeatures';
 import { DEFAULT_TIMEZONE, TIMEZONE_OPTIONS } from '../utils/timezoneData';
 
 const TABS = [
@@ -24,6 +26,7 @@ type TabId = typeof TABS[number]['id'];
 
 const Settings = () => {
     const { db, addRecord, updateRecord } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
     const userEmail = localStorage.getItem('userEmail') || '';
     const userRole = localStorage.getItem('userRole') || '';
     const sessionAgentId = localStorage.getItem('agentId') || '';
@@ -81,6 +84,7 @@ const Settings = () => {
             branchName: settingsRecord?.branchName || '',
             ifscCode: settingsRecord?.ifscCode || '',
             gstDetails: settingsRecord?.gstDetails || '',
+            planInrPerUsd: String(settingsRecord?.planInrPerUsd ?? ''),
         }),
         [
             settingsRecord?.id,
@@ -98,6 +102,7 @@ const Settings = () => {
             settingsRecord?.branchName,
             settingsRecord?.ifscCode,
             settingsRecord?.gstDetails,
+            settingsRecord?.planInrPerUsd,
             currentAgent?.emailJsServiceId,
             currentAgent?.emailJsTemplateId,
             currentAgent?.emailJsPublicKey,
@@ -130,6 +135,12 @@ const Settings = () => {
 
     const handleSave = () => {
         if (!hasChanges) return;
+
+        const inrPerUsd = formState.planInrPerUsd.trim();
+        if (inrPerUsd && !(Number(inrPerUsd) > 0)) {
+            alert('USD conversion rate must be a number greater than 0, or left blank to use the live rate.');
+            return;
+        }
 
         const emailJsFields = {
             emailJsServiceId: formState.emailJsServiceId,
@@ -216,8 +227,9 @@ const Settings = () => {
                                             )}
                                         </div>
                                         
+                                        {hasPlanFeature('agencyBranding') && (
                                         <div className="flex flex-col gap-2 w-full">
-                                            <button 
+                                            <button
                                                 type="button"
                                                 onClick={() => document.getElementById('logo-upload')?.click()}
                                                 className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 hover:border-crm-500 hover:text-crm-600 transition-all shadow-sm"
@@ -262,6 +274,7 @@ const Settings = () => {
                                                 }}
                                             />
                                         </div>
+                                        )}
                                     </div>
 
                                     <div className="flex-1 w-full space-y-8 pt-2">
@@ -277,11 +290,15 @@ const Settings = () => {
                                             <p className="text-[10px] text-slate-400 mt-3 font-medium uppercase tracking-wider">This name will appear on all your invoices and itineraries.</p>
                                         </div>
                                         
-                                        <div className="p-5 bg-crm-50/50 border border-crm-100 rounded-2xl">
-                                            <p className="text-[10px] text-crm-700 font-bold leading-relaxed">
-                                                Tip: Use a high-quality square PNG with a transparent background for the best results on printed documents.
-                                            </p>
-                                        </div>
+                                        {hasPlanFeature('agencyBranding') ? (
+                                            <div className="p-5 bg-crm-50/50 border border-crm-100 rounded-2xl">
+                                                <p className="text-[10px] text-crm-700 font-bold leading-relaxed">
+                                                    Tip: Use a high-quality square PNG with a transparent background for the best results on printed documents.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <PlanFeatureLocked inline features={['agencyBranding']} />
+                                        )}
                                     </div>
                                 </div>
 
@@ -351,7 +368,48 @@ const Settings = () => {
                                     </div>
                                 </div>
                             </div>
+
+                            {userRole === 'admin' && (
+                                <>
+                                    <hr className="border-slate-100" />
+
+                                    <div>
+                                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                            <DollarSign size={20} className="text-crm-500" />
+                                            Plan Pricing (USD)
+                                        </h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">USD Conversion Rate</label>
+                                                <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden focus-within:border-crm-500">
+                                                    <span className="px-3 py-2 bg-slate-50 text-sm font-medium text-slate-500 border-r border-slate-200 whitespace-nowrap">1 USD = ₹</span>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        step="0.01"
+                                                        value={formState.planInrPerUsd}
+                                                        onChange={(e) => handleFieldChange('planInrPerUsd', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm outline-none"
+                                                        placeholder="e.g. 85"
+                                                    />
+                                                </div>
+                                                <p className="text-xs text-slate-500 mt-2">
+                                                    Subscription plan prices shown in USD (to agencies outside India) are converted from INR at this rate. Leave blank to use the live exchange rate.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </>
+                    ) : activeTab === 'integrations' && !hasPlanFeature('agencyEmail') ? (
+                        <div className="max-w-xl">
+                            <PlanFeatureLocked inline features={['agencyEmail']} />
+                        </div>
+                    ) : activeTab === 'banking' && !hasPlanFeature('bankDetails') ? (
+                        <div className="max-w-xl">
+                            <PlanFeatureLocked inline features={['bankDetails']} />
+                        </div>
                     ) : activeTab === 'integrations' ? (
                         <div className="space-y-6 max-w-xl">
                             <div>

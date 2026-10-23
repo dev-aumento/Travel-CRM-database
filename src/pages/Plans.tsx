@@ -4,6 +4,18 @@ import { Check, Shield, Zap, Crown, Users, UserPlus, FileText, ChevronRight } fr
 import { useDatabase } from '../context/DatabaseContext';
 import { resolveMainAgencyAgent } from '../utils/databaseSync';
 import { buildApprovalPlanFields, sortPlansByPriceAsc } from '../utils/agentPlan';
+import {
+    type BillingCycle,
+    formatPlanPrice,
+    getPlanPeriodLabel,
+    getPlatformInrPerUsd,
+    getYearlySavingsPercent,
+    isFreePlan,
+    normalizeBillingCycle,
+    useInrUsdRate,
+    useViewerPlanCurrency,
+} from '../utils/planPricing';
+import { PLAN_FEATURES, getPlanFeatureKeys } from '../utils/planFeatures';
 
 const Plans = () => {
     const { db, updateRecord } = useDatabase();
@@ -16,7 +28,9 @@ const Plans = () => {
         userEmail,
     });
     const currentAgentPlan = currentAgent?.plan || 'Lite';
+    const currentBillingCycle = normalizeBillingCycle(currentAgent?.billingCycle);
 
+    const [billingCycle, setBillingCycle] = React.useState<BillingCycle>('monthly');
     const [upgradingTo, setUpgradingTo] = React.useState<string | null>(null);
     const [showSuccess, setShowSuccess] = React.useState(false);
     const syncSubAgentPlans = (planName: string, planFields: Record<string, unknown> = {}) => {
@@ -50,11 +64,12 @@ const Plans = () => {
             try {
                 if (currentAgent) {
                     const planFields = buildApprovalPlanFields(
-                        { ...currentAgent, plan: planName, isTrial: false },
+                        { ...currentAgent, plan: planName, isTrial: false, billingCycle },
                         db.plans?.data || []
                     );
                     updateRecord('travelAgents', currentAgent.id, {
                         plan: planName,
+                        billingCycle,
                         planRenewedAt: new Date().toISOString(),
                         isTrial: false,
                         trialEndsAt: null,
@@ -94,12 +109,19 @@ const Plans = () => {
         setTimeout(() => setShowSuccess(false), 3000);
     };
     const dbPlans = sortPlansByPriceAsc(db.plans?.data || []);
-    
+    // Country comes from the viewer's IP (so a VPN location is respected), not the browser timezone
+    const { currency: viewerCurrency } = useViewerPlanCurrency();
+    const { rate: usdPerInr, loading: rateLoading } = useInrUsdRate(getPlatformInrPerUsd(db));
+    // Without any live rate, show INR rather than a guessed USD price
+    const planCurrency = viewerCurrency === 'USD' && usdPerInr == null && !rateLoading ? 'INR' : viewerCurrency;
+
     const plans = dbPlans.map((p: any) => ({
         name: p.name,
         tagline: p.tagline,
-        price: p.price,
-        period: p.period,
+        price: formatPlanPrice(p, planCurrency, usdPerInr, billingCycle),
+        period: getPlanPeriodLabel(p, billingCycle),
+        isFree: isFreePlan(p),
+        yearlySavings: getYearlySavingsPercent(p),
         icon: p.name === 'Lite' ? <Zap className="text-blue-500" size={24} /> : 
               p.name === 'Growth' ? <Shield className="text-crm-600" size={24} /> : 
               <Crown className="text-amber-500" size={24} />,
@@ -110,9 +132,11 @@ const Plans = () => {
             subAgents: 'Unlimited',
             quotations: 'Unlimited'
         },
-        features: (p.features || '').split(','),
-        buttonText: `Upgrade to ${p.name}`
+        // Exactly the features this plan unlocks (matches what the agency gets after choosing it)
+        features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
+        buttonText: p.name === currentAgentPlan ? `Switch to ${billingCycle} billing` : `Upgrade to ${p.name}`
     }));
+    const maxYearlySavings = Math.max(0, ...plans.map((p: any) => p.yearlySavings));
 
     return (
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto relative">
@@ -175,9 +199,32 @@ const Plans = () => {
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05)_0%,transparent_70%)]"></div>
             </div>
 
+            {/* Billing cycle tabs */}
+            <div className="flex justify-center mb-10">
+                <div className="inline-flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+                    {(['monthly', 'yearly'] as const).map((cycle) => (
+                        <button
+                            key={cycle}
+                            type="button"
+                            onClick={() => setBillingCycle(cycle)}
+                            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${billingCycle === cycle ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            {cycle === 'monthly' ? 'Monthly' : 'Yearly'}
+                            {cycle === 'yearly' && maxYearlySavings > 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wider">
+                                    Save up to {maxYearlySavings}%
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-7xl mx-auto w-full pb-12">
                 {plans.map((plan: any) => {
-                    const isCurrent = currentAgentPlan === plan.name;
+                    // Paid plans are only "current" on the tab matching the agent's billing cycle
+                    const isCurrent =
+                        currentAgentPlan === plan.name && (plan.isFree || currentBillingCycle === billingCycle);
                     return (
                         <div 
                             key={plan.name}
@@ -221,7 +268,13 @@ const Plans = () => {
                                 <div className="flex items-baseline gap-1 mb-8">
                                     <span className="text-4xl font-black text-slate-900">{plan.price}</span>
                                     <span className="text-slate-400 font-medium">{plan.period}</span>
+                                    <span className="ml-1 text-[10px] font-black text-slate-400 uppercase tracking-widest">{planCurrency}</span>
                                 </div>
+                                {billingCycle === 'yearly' && plan.yearlySavings > 0 && (
+                                    <p className="-mt-6 mb-8 text-xs font-bold text-emerald-600">
+                                        Save {plan.yearlySavings}% vs. paying monthly
+                                    </p>
+                                )}
 
                                 {/* Plan Regulation (Staff & Agents) */}
                                 <div className="space-y-4 mb-8 bg-slate-50 p-6 rounded-3xl border border-slate-100">

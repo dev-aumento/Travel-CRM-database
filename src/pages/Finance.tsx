@@ -39,6 +39,7 @@ import { PLATFORM_NAME } from '../constants/platform';
 import DropdownChevron from '../components/DropdownChevron';
 import AgencyBankDetailsBlock from '../components/AgencyBankDetailsBlock';
 import { resolveAgencyBankDetails } from '../utils/agencyBankDetails';
+import { usePlanFeatures } from '../utils/planFeatures';
 
 type InvoiceRow = { booking: any; payment: BookingPaymentDetails };
 
@@ -46,6 +47,7 @@ const Finance = () => {
     const userRole = localStorage.getItem('userRole');
 
     const { db, updateRecord } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
     const { formatMoney, currencySymbol, formatInputValue, parseInputValue, toInputAmount, priceInputStep } =
         useCurrency();
     const currentAgentId = localStorage.getItem('agentId');
@@ -676,6 +678,7 @@ const Finance = () => {
 
                     {/* Fixed Controls */}
                     <div className="fixed top-8 right-8 flex gap-4 z-[120] print:hidden">
+                        {hasPlanFeature('csvExport') && (
                         <button
                             onClick={() => {
                                 const headers = ['Tracking ID', 'Booking Ref', 'Customer', 'Package', 'Agent', 'Total Bill', 'Paid', 'Status', 'Date'];
@@ -704,6 +707,7 @@ const Finance = () => {
                         >
                             <Download size={18} /> Download CSV
                         </button>
+                        )}
                         <button
                             onClick={() => window.print()}
                             className="bg-white text-slate-900 px-8 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-slate-50 transition-all flex items-center gap-3 active:scale-95"

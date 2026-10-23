@@ -4,6 +4,7 @@ import {
     hasAgencyBankDetails,
     type AgencyBankDetails,
 } from '../utils/agencyBankDetails';
+import { usePlanFeatures } from '../utils/planFeatures';
 
 type Props = {
     details?: AgencyBankDetails | null;
@@ -18,7 +19,8 @@ const AgencyBankDetailsBlock: React.FC<Props> = ({
     className = '',
     variant = 'print',
 }) => {
-    if (!hasAgencyBankDetails(details)) return null;
+    const { hasFeature } = usePlanFeatures();
+    if (!hasFeature('bankDetails') || !hasAgencyBankDetails(details)) return null;
     const lines = formatAgencyBankDetailsLines(details);
 
     if (variant === 'screen') {

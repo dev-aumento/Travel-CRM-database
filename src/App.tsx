@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import SystemLayout from './components/layout/SystemLayout';
 import Dashboard from './pages/Dashboard';
@@ -16,7 +16,9 @@ import Finance from './pages/Finance';
 import AdminSubscriptionFinance from './pages/AdminSubscriptionFinance';
 import Plans from './pages/Plans';
 import TermsConditions from './pages/TermsConditions';
+import PlanFeatureLocked from './components/PlanFeatureLocked';
 import { DatabaseProvider, useDatabase } from './context/DatabaseContext';
+import { ROUTE_PLAN_FEATURES, canAccessRouteOnPlan, getAgencyPlanFeatures } from './utils/planFeatures';
 import { ThemeProvider } from './context/ThemeContext';
 import {
     agentRequiresOnboarding,
@@ -51,6 +53,10 @@ function AppContent() {
   const [agentId, setAgentId] = useState(() => localStorage.getItem('agentId') || '');
   const [userPermissions, setUserPermissions] = useState<PermissionKey[]>(() => getStoredPermissions());
   const { db } = useDatabase();
+  const planFeatures = useMemo(
+    () => getAgencyPlanFeatures(db, { userRole, sessionAgentId: agentId, userEmail }),
+    [db, userRole, agentId, userEmail]
+  );
 
   useEffect(() => {
     if (!isAuthenticated || userRole === 'admin') return;
@@ -184,9 +190,17 @@ function AppContent() {
     );
   }
 
+  // Modules missing from the agency's subscription plan show an upgrade notice instead
+  const planGate = (path: string, element: React.ReactNode) =>
+    canAccessRouteOnPlan(planFeatures, path) ? (
+      element
+    ) : (
+      <PlanFeatureLocked features={ROUTE_PLAN_FEATURES[path]} />
+    );
+
   const guardRoute = (path: string, element: React.ReactNode) =>
     canAccessRoute(userRole, userPermissions, path, { isSubAgentSession }) ? (
-      element
+      planGate(path, element)
     ) : (
       <Navigate to="/" replace />
     );
@@ -196,12 +210,12 @@ function AppContent() {
   return (
     <Routes>
       <Route element={<SystemLayout onLogout={handleLogout} userRole={userRole} userPermissions={userPermissions} />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={planGate('/', <Dashboard />)} />
         <Route
           path="/my-team"
           element={
             canAccessTeamRoute(userRole, userPermissions, isSubAgentSession) ? (
-              <TravelAgent />
+              planGate('/my-team', <TravelAgent />)
             ) : (
               <Navigate to="/" replace />
             )

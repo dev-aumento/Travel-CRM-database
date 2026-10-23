@@ -21,6 +21,7 @@ import {
 import { PLATFORM_NAME } from '../constants/platform';
 import HotelSpecialInclusionsSection, { type HotelSpecialInclusion } from '../components/HotelSpecialInclusionsSection';
 import QuoteEmailSendModal from '../components/QuoteEmailSendModal';
+import { usePlanFeatures } from '../utils/planFeatures';
 import LeadQuoteWorkbench, { type LeadWorkbenchTab } from '../components/LeadQuoteWorkbench';
 import QuoteTermsSection from '../components/QuoteTermsSection';
 import QuoteBuilderReviewPreview from '../components/QuoteBuilderReviewPreview';
@@ -343,6 +344,9 @@ const formatItineraryVehicleLabel = (
 
 const Quotations = () => {
     const { db, addRecord, updateRecord, deleteRecord, getNextId } = useDatabase();
+    const { hasFeature: hasPlanFeature } = usePlanFeatures();
+    const canShareQuotes = hasPlanFeature('quoteSharing');
+    const canDownloadQuotePdf = hasPlanFeature('quotePdf');
     const {
         formatMoney,
         currencySymbol,
@@ -4227,10 +4231,10 @@ const Quotations = () => {
                         onSelectQuote={(id) => setSelectedQuoteId(id)}
                         onNewQuote={() => prefillLeadForNewQuote(workbenchLead, selectedQuote)}
                         onEditQuote={() => handleEditMode(selectedQuote)}
-                        onShareWhatsApp={handleWhatsAppShare}
-                        onShareEmail={handleEmailShare}
+                        onShareWhatsApp={canShareQuotes ? handleWhatsAppShare : undefined}
+                        onShareEmail={canShareQuotes ? handleEmailShare : undefined}
                         customerEmail={resolveCustomerEmail(selectedQuote, db?.leads?.data || [])}
-                        onPrint={() => setShowQuotePrintPreview(true)}
+                        onPrint={canDownloadQuotePdf ? () => setShowQuotePrintPreview(true) : undefined}
                         onDeleteQuote={
                             selectedQuote ? () => handleDeleteQuote(selectedQuote) : undefined
                         }
@@ -6724,31 +6728,39 @@ const Quotations = () => {
                         >
                             <Edit3 size={18} /> Modify
                         </button>
-                        <button 
-                            onClick={handleWhatsAppShare} 
-                            className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-emerald-700 transition-all flex items-center gap-3 active:scale-95"
-                        >
-                            <Send size={18} /> WhatsApp
-                        </button>
-                        <button 
-                            onClick={handleEmailShare} 
-                            className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95"
-                        >
-                            <Mail size={18} /> Email
-                        </button>
-                        <button 
-                            onClick={handleQuotePdfDownload}
-                            disabled={isQuotePdfDownloading}
-                            className="bg-white text-slate-900 px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-slate-50 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                            <Download size={18} /> {isQuotePdfDownloading ? 'Preparing…' : 'Download PDF'}
-                        </button>
-                        <button 
-                            onClick={() => window.print()} 
-                            className="bg-white/10 hover:bg-white/20 text-white px-6 py-3 rounded-2xl backdrop-blur-md border border-white/20 shadow-2xl transition-all flex items-center gap-3 active:scale-95 font-bold"
-                        >
-                            <FileText size={18} /> Print
-                        </button>
+                        {canShareQuotes && (
+                            <>
+                                <button
+                                    onClick={handleWhatsAppShare}
+                                    className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-emerald-700 transition-all flex items-center gap-3 active:scale-95"
+                                >
+                                    <Send size={18} /> WhatsApp
+                                </button>
+                                <button
+                                    onClick={handleEmailShare}
+                                    className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95"
+                                >
+                                    <Mail size={18} /> Email
+                                </button>
+                            </>
+                        )}
+                        {canDownloadQuotePdf && (
+                            <>
+                                <button
+                                    onClick={handleQuotePdfDownload}
+                                    disabled={isQuotePdfDownloading}
+                                    className="bg-white text-slate-900 px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-slate-50 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    <Download size={18} /> {isQuotePdfDownloading ? 'Preparing…' : 'Download PDF'}
+                                </button>
+                                <button
+                                    onClick={() => window.print()}
+                                    className="bg-white/10 hover:bg-white/20 text-white px-6 py-3 rounded-2xl backdrop-blur-md border border-white/20 shadow-2xl transition-all flex items-center gap-3 active:scale-95 font-bold"
+                                >
+                                    <FileText size={18} /> Print
+                                </button>
+                            </>
+                        )}
                         <button 
                             onClick={closeQuotePreview} 
                             className="bg-white/10 hover:bg-white/20 text-white p-4 rounded-2xl backdrop-blur-md border border-white/20 shadow-2xl transition-all active:scale-95"
