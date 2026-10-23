@@ -2031,7 +2031,7 @@ const AgentLeadsView = () => {
                             ? `${leads.length} lead${leads.length === 1 ? '' : 's'} across all agencies`
                             : `${leads.length} lead${leads.length === 1 ? '' : 's'} in your agency`}
                     </p>
-                    )}
+                    )}  
                 </div>
                 <div className="flex items-center gap-2 lg:gap-3 w-full lg:w-auto">
                     <button
