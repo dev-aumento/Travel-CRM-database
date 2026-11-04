@@ -255,17 +255,19 @@ const Plans = () => {
                             )}
 
                             <div className="p-8">
-                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 mt-4 ${
-                                    plan.color === 'blue' ? 'bg-blue-50' : 
-                                    plan.color === 'crm' ? 'bg-crm-50' : 'bg-amber-50'
-                                }`}>
-                                    {plan.icon}
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 mt-2 ${
+                                        plan.color === 'blue' ? 'bg-blue-50' : 
+                                        plan.color === 'crm' ? 'bg-crm-50' : 'bg-amber-50'
+                                    }`}>
+                                        {plan.icon}
+                                    </div>
+
+                                    <h3 className="text-2xl font-bold text-slate-800">{plan.name}</h3>
                                 </div>
+                                <p className="text-sm text-slate-500 mb-4 leading-relaxed">{plan.tagline}</p>
 
-                                <h3 className="text-2xl font-bold text-slate-800 mb-2">{plan.name}</h3>
-                                <p className="text-sm text-slate-500 mb-6 leading-relaxed">{plan.tagline}</p>
-
-                                <div className="flex items-baseline gap-1 mb-8">
+                                <div className="flex items-baseline gap-1 mb-5">
                                     <span className="text-4xl font-black text-slate-900">{plan.price}</span>
                                     <span className="text-slate-400 font-medium">{plan.period}</span>
                                     <span className="ml-1 text-[10px] font-black text-slate-400 uppercase tracking-widest">{planCurrency}</span>
@@ -277,7 +279,7 @@ const Plans = () => {
                                 )}
 
                                 {/* Plan Regulation (Staff & Agents) */}
-                                <div className="space-y-4 mb-8 bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                                <div className="space-y-4 mb-6 bg-slate-50 p-4 rounded-3xl border border-slate-100">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2 bg-white rounded-xl text-slate-400 shadow-sm">

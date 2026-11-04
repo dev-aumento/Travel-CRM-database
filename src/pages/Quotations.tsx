@@ -291,11 +291,22 @@ const isFreeDayActivity = (act: any): boolean => {
     return title.includes('free day') || title.includes('exploring on your own');
 };
 
-const getAssignedActivityKeys = (itinerary: any[]): Set<string> => {
+/** Airport arrival/departure transfers can be used only once per itinerary. */
+const isOnceOnlyActivity = (act: any): boolean => {
+    const id = String(act?.id || '').trim().toUpperCase();
+    if (id === 'GLOBAL-2' || id === 'GLOBAL-3') return true;
+    const title = String(act?.title || act?.name || '').toLowerCase();
+    return (
+        title.includes('airport arrival') ||
+        title.includes('airport departure')
+    );
+};
+
+const getAssignedOnceOnlyActivityKeys = (itinerary: any[]): Set<string> => {
     const keys = new Set<string>();
     itinerary.forEach((day) => {
         (day.activities || []).forEach((act: any) => {
-            if (isFreeDayActivity(act)) return;
+            if (!isOnceOnlyActivity(act)) return;
             keys.add(getActivityAssignmentKey(act));
         });
     });
@@ -1652,11 +1663,6 @@ const Quotations = () => {
         () => mergeActivityCatalog(db?.activities?.data || []),
         [db?.activities?.data]
     );
-    const assignedActivityKeys = useMemo(
-        () => getAssignedActivityKeys(formItinerary),
-        [formItinerary]
-    );
-
     const BUILTIN_HOTEL_TIERS = ['Standard', 'Deluxe', 'Luxury'];
     const BUILTIN_ROOM_TYPES = ['Standard Room', 'Deluxe Room', 'Suite Room'];
     const settingsRecord = db?.settings?.data?.[0];
@@ -2015,7 +2021,7 @@ const Quotations = () => {
 
     const syncItineraryToTripDuration = useCallback((nights: number) => {
         const days = Math.max(1, nights) + 1;
-        setFormItinerary(buildDefaultItinerary(days));
+        setFormItinerary((prev) => normalizeItinerary(prev, days));
     }, []);
 
     const handleTripDurationChange = (value: number, unit?: 'nights' | 'days') => {
@@ -2295,14 +2301,21 @@ const Quotations = () => {
         return activity;
     };
 
+    const assignedOnceOnlyActivityKeys = useMemo(
+        () => getAssignedOnceOnlyActivityKeys(formItinerary),
+        [formItinerary]
+    );
+
     const addActivityToItineraryDay = useCallback(
         (dayIdx: number, activity: any) => {
             if (dayIdx < 0 || dayIdx >= formItinerary.length || !activity) return false;
-            const draggedKey = getActivityAssignmentKey(activity);
-            if (!isFreeDayActivity(activity)) {
+
+            // Airport arrival/departure: allow once only across the whole itinerary
+            if (isOnceOnlyActivity(activity)) {
+                const key = getActivityAssignmentKey(activity);
                 const alreadyAssigned = formItinerary.some((day) =>
                     (day.activities || []).some(
-                        (act: any) => getActivityAssignmentKey(act) === draggedKey
+                        (act: any) => getActivityAssignmentKey(act) === key
                     )
                 );
                 if (alreadyAssigned) return false;
@@ -2318,12 +2331,9 @@ const Quotations = () => {
                             {
                                 ...activity,
                                 customPrice: activity.price ?? activity.customPrice ?? 0,
-                                ...(isFreeDayActivity(activity)
-                                    ? {
-                                          allowTitleEdit: true,
-                                          instanceId: `${getActivityAssignmentKey(activity)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                                      }
-                                    : {}),
+                                // Unique instance so reusable catalog activities can appear more than once
+                                instanceId: `${getActivityAssignmentKey(activity)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                                ...(isFreeDayActivity(activity) ? { allowTitleEdit: true } : {}),
                             },
                         ],
                     };
@@ -2703,29 +2713,36 @@ const Quotations = () => {
         return dep.toISOString().split('T')[0];
     }, [formDepartureDate, effectiveNights]);
 
-    // AUTO-DURATION SYNC: When preset changes, rebuild itinerary
-    // Skip this when loading an existing quote (isEditingExistingRef is set in handleEditMode)
+    // AUTO-DURATION SYNC: When package template changes, rebuild itinerary length.
+    // Custom mode keeps the customer-selected nights/days (do not overwrite from preset).
     useEffect(() => {
-        if (isCreating) {
-            if (isEditingExistingRef.current) {
-                // First run after edit-mode load — skip rebuild, clear flag for next preset change
-                isEditingExistingRef.current = false;
-                return;
-            }
-
-            // [FIX] Skip auto-rebuild if we are in a Negotiation/Revision flow (iterationParent)
-            // This preserves the parent's customized itinerary
-            if (iterationParent) return;
-
-            const preset = allPresets.find(p => p.id === selectedPresetId);
-            if (preset) {
-                const nights = Math.max(1, parseDurationNights(preset.duration));
-                setFormTripDurationUnit('nights');
-                setFormTripDurationValue(nights);
-                setFormItinerary(buildDefaultItinerary(nights + 1));
-            }
+        if (!isCreating || tripMode !== 'package') return;
+        if (isEditingExistingRef.current) {
+            // First run after edit-mode load — skip rebuild, clear flag for next preset change
+            isEditingExistingRef.current = false;
+            return;
         }
-    }, [selectedPresetId, isCreating]);
+        // Preserve parent itinerary during negotiation/revision
+        if (iterationParent) return;
+
+        const preset = allPresets.find((p) => p.id === selectedPresetId);
+        if (!preset) return;
+        const nights = Math.max(1, parseDurationNights(preset.duration));
+        setFormTripDurationUnit('nights');
+        setFormTripDurationValue(nights);
+        setFormItinerary((prev) => normalizeItinerary(prev, nights + 1));
+    }, [selectedPresetId, isCreating, tripMode, allPresets, iterationParent]);
+
+    // Keep itinerary day count aligned with Customer Information duration (nights + 1 days)
+    useEffect(() => {
+        if (!isCreating) return;
+        if (iterationParent) return;
+        const desiredDays = resolvedTripDays;
+        setFormItinerary((prev) => {
+            if (!Array.isArray(prev) || prev.length === desiredDays) return prev;
+            return normalizeItinerary(prev, desiredDays);
+        });
+    }, [resolvedTripDays, isCreating, iterationParent]);
 
     useEffect(() => {
         if (!selectedPresetId) return;
@@ -3771,59 +3788,8 @@ const Quotations = () => {
                                                     setFormTripId(lead.trackingId || lead.tripId);
                                                 }
 
-                                                const destBoot = applyLeadDestinationToBuilder(lead);
-                                                const presetDays = destBoot.matchedPreset?.duration
-                                                    ? parseDurationNights(destBoot.matchedPreset.duration) + 1
-                                                    : 1;
-                                                setFormItinerary(buildDefaultItinerary(presetDays));
-
-                                                // PRIORITIZE ISO START DATE
-                                                if (lead.startDate) {
-                                                    setFormDepartureDate(lead.startDate);
-                                                } else {
-                                                    const depDate = parseLeadDate(lead.dates);
-                                                    if (depDate) setFormDepartureDate(depDate);
-                                                }
-
-                                                const { adults, kids } = parseTravelers(lead.travelers);
-                                                setFormAdults(adults);
-                                                setFormKids(kids);
-                                                setFormKidsAges(Array.isArray(lead.kidAges) ? lead.kidAges.join(', ') : '');
-
-                                                if (lead.sourceCountry) setFormSourceCountry(lead.sourceCountry);
-                                                if (lead.sourceAirport) setFormSourceAirport(lead.sourceAirport);
-                                                if (lead.phone) {
-                                                    const matchedCode = COUNTRY_PHONE_DATA.find(c => lead.phone.startsWith(c.code));
-                                                    if (matchedCode) {
-                                                        setFormCountryCode(matchedCode.code);
-                                                        setFormPhone(lead.phone.slice(matchedCode.code.length).trim());
-                                                    } else {
-                                                        setFormCountryCode('+91');
-                                                        setFormPhone(String(lead.phone).replace(/^\+\d+\s?/, ''));
-                                                    }
-                                                }
-
-                                                // INHERIT AGENT
-                                                if (lead.agentId) {
-                                                    setFormAgentId(lead.agentId);
-                                                    setFormAgentName(lead.agentName);
-                                                }
-
-                                                // INHERIT LOGISTICS (flight defaults to No for new quotes)
-                                                setFormFlightMeal({ optIn: false, type: 'Veg' });
-                                                setFormNeedFlight(false);
-                                                setCustomFlightTotal(null);
-                                                if (lead.hotelMealPlan) setFormHotelMealPlan(lead.hotelMealPlan);
-                                                if (lead.hotelTier) setFormHotelTier(lead.hotelTier);
-                                                setFormHotelId('');
-                                                setFormHotelInput('');
-                                                setFormHotelStays([]);
-                                                setHotelSelectionConfirmed(false);
-                                                if (lead.customHotelRate) setCustomHotelRate(lead.customHotelRate);
-
+                                                prefillLeadForNewQuote(lead);
                                                 setSidebarAccordionOpen(false);
-                                                setIsCreating(true);
-                                                setSelectedQuoteId(null);
                                             }}
                                             className="w-full py-1.5 bg-white border border-blue-200 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5"
                                         >
@@ -4246,16 +4212,16 @@ const Quotations = () => {
 
                 {isCreating && (
                     <div className="flex flex-col flex-1 min-h-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden print:hidden w-full">
-                        <div className="shrink-0 px-6 py-4 border-b border-slate-100 bg-slate-50">
+                        <div className="shrink-0 px-5 py-3 border-b border-slate-100 bg-slate-50">
                             <h2 className="text-lg font-bold text-slate-800">
                                 <span className="text-crm-600">Building Package</span>
                             </h2>
                             <p className="text-sm text-slate-500">Curating a personalized experience for {formCustomer || 'New Client'}</p>
                         </div>
                         <form onSubmit={handleGenerate} noValidate className="flex flex-col flex-1 min-h-0">
-                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 space-y-8 custom-scrollbar" data-quote-builder-scroll>
+                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 md:p-5 space-y-3 custom-scrollbar" data-quote-builder-scroll>
                             {/* ── Mode Switcher ── */}
-                            <div className="flex justify-center mb-8">
+                            <div className="flex justify-center">
                                 <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1">
                                     <button
                                         type="button"
@@ -4277,26 +4243,71 @@ const Quotations = () => {
                                 </div>
                             </div>
 
-                            <div className="mb-6">
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-                                    {builderSteps.map((step, index) => (
-                                        <button
-                                            key={step.id}
-                                            type="button"
-                                            onClick={() => navigateToBuilderStep(step.id)}
-                                            className={`text-left px-3 py-2 rounded-xl border transition-all ${
-                                                builderStep === step.id
-                                                    ? 'bg-crm-50 border-crm-300 text-crm-700'
-                                                    : isBuilderStepCompleted(step.id)
-                                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                                                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                                            }`}
-                                        >
-                                            <div className="text-[10px] font-black uppercase tracking-wider">Step {index + 1}</div>
-                                            <div className="text-[11px] font-bold leading-tight mt-0.5">{step.label}</div>
-                                        </button>
-                                    ))}
+                            <div className="px-1 pt-1 pb-0">
+                                <div className="flex items-center md:items-start w-full">
+                                    {builderSteps.map((step, index) => {
+                                        const isActive = builderStep === step.id;
+                                        const isCompleted = isBuilderStepCompleted(step.id);
+                                        const isPast = index < currentBuilderStepIndex;
+                                        return (
+                                            <React.Fragment key={step.id}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigateToBuilderStep(step.id)}
+                                                    title={step.label}
+                                                    aria-label={`Step ${index + 1}: ${step.label}`}
+                                                    aria-current={isActive ? 'step' : undefined}
+                                                    className="flex flex-col items-center gap-2 min-w-0 flex-1 group outline-none"
+                                                >
+                                                    <span
+                                                        className={`relative z-[1] flex h-8 w-8 md:h-9 md:w-9 items-center justify-center rounded-full text-sm font-bold transition-all duration-500 ease-out ${
+                                                            isActive
+                                                                ? 'bg-crm-600 text-white shadow-[0_0_0_4px_rgba(37,99,235,0.15)]'
+                                                                : isCompleted || isPast
+                                                                    ? 'bg-crm-500 text-white'
+                                                                    : 'bg-slate-300 text-white group-hover:bg-slate-400'
+                                                        }`}
+                                                    >
+                                                        {isCompleted && !isActive ? (
+                                                            <CheckCircle2 size={16} className="animate-in zoom-in duration-300" />
+                                                        ) : (
+                                                            <span className={isActive ? 'animate-in zoom-in duration-300' : ''}>
+                                                                {index + 1}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <span
+                                                        className={`hidden md:block text-[11px] sm:text-xs leading-snug text-center px-1 transition-colors duration-300 ${
+                                                            isActive
+                                                                ? 'font-bold text-crm-600'
+                                                                : isCompleted || isPast
+                                                                    ? 'font-semibold text-slate-600'
+                                                                    : 'font-medium text-slate-500'
+                                                        }`}
+                                                    >
+                                                        {step.label}
+                                                    </span>
+                                                </button>
+                                                {index < builderSteps.length - 1 && (
+                                                    <div
+                                                        className="flex-1 min-w-[8px] max-w-none md:max-w-[80px] md:flex-[0.6] h-[2px] rounded-full bg-slate-200 relative overflow-hidden shrink-0 self-center md:self-start md:mt-[17px] mx-0.5"
+                                                        aria-hidden
+                                                    >
+                                                        <div
+                                                            className="absolute inset-y-0 left-0 rounded-full bg-crm-500 transition-all duration-500 ease-out"
+                                                            style={{
+                                                                width: index < currentBuilderStepIndex ? '100%' : '0%',
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })}
                                 </div>
+                                <p className="md:hidden mt-3 text-center text-xs font-bold text-crm-600">
+                                    {builderSteps[currentBuilderStepIndex]?.label}
+                                </p>
                             </div>
 
                             {iterationParent?.customizationRequest && (
@@ -4323,128 +4334,133 @@ const Quotations = () => {
                                     </div>
                                 </div>
                             )}
-                            {/* ── Section 1: Customer & Destination Header ── */}
+                            {/* ── Section 1: Customer Information ── */}
                             {builderStep === 'customer' && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 p-5 bg-slate-50/50 rounded-2xl border border-slate-100">
-                                <div>
-                                    <label className="form-label">Client Name</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={formCustomer}
-                                        onChange={e => setFormCustomer(e.target.value)}
-                                        className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all"
-                                        placeholder="John Doe"
-                                    />
-                                </div>
-                                <div className="lg:col-span-1">
-                                    <label className="form-label">Assigned Agent</label>
-                                    <div className="relative group crm-select-wrap">
-                                        <select
-                                            value={formAgentId}
-                                            onChange={e => {
-                                                const val = e.target.value;
-                                                setFormAgentId(val);
-                                                const agentObj = (db?.travelAgents?.data || []).find((a: any) => a.id === val);
-                                                if (agentObj) {
-                                                    setFormAgentName(agentObj.name);
-                                                } else {
-                                                    const staffObj = (db?.staff?.data || []).find((s: any) => s.employeeId === val);
-                                                    setFormAgentName(staffObj ? staffObj.name : '');
-                                                }
-                                            }}
-                                            className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 appearance-none transition-all hover:bg-white"
-                                        >
-                                            <option value="">{userRole === 'admin' ? 'Direct / Unassigned' : 'Me (Direct Handling)'}</option>
-                                            {userRole === 'admin' ? (
-                                                (db?.travelAgents?.data || []).map((agent: any) => (
-                                                    <option key={agent.id} value={agent.id}>{agent.name}</option>
-                                                ))
-                                            ) : (
-                                                <>
-                                                    {filterStaffForAgentSession(db?.staff?.data || [], currentAgentId, db).map((member: any) => (
-                                                        <option key={member.id} value={member.employeeId}>Staff: {member.name} ({member.role})</option>
-                                                    ))}
-                                                    {(db?.travelAgents?.data || []).filter((a: any) => a.parentId === currentAgentId).map((subAgent: any) => (
-                                                        <option key={subAgent.id} value={subAgent.id}>Sub-Agent: {subAgent.name}</option>
-                                                    ))}
-                                                </>
-                                            )}
-                                        </select>
-                                        <User size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-crm-500 transition-colors" />
-                                        <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                            <DropdownChevron size={16} />
-                                        </div>
+                            <div className="p-6 md:p-7 bg-white rounded-2xl border border-slate-200 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                {/* Row 1: Client Name · Assigned Agent · Client Mobile */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="form-label">Client Name</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={formCustomer}
+                                            onChange={e => setFormCustomer(e.target.value)}
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all"
+                                            placeholder="John Doe"
+                                        />
                                     </div>
-                                </div>
-                                <div className="lg:col-span-2">
-                                    <label className="form-label">Client Mobile</label>
-                                    <div className="flex gap-2">
-                                        <div className="relative w-36 shrink-0 group crm-select-wrap">
+                                    <div>
+                                        <label className="form-label">Assigned Agent</label>
+                                        <div className="relative group crm-select-wrap">
                                             <select
-                                                value={formCountryCode}
-                                                onChange={(e) => {
-                                                    setFormCountryCode(e.target.value);
-                                                    setFormPhone('');
-                                                    setPhoneError('');
+                                                value={formAgentId}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setFormAgentId(val);
+                                                    const agentObj = (db?.travelAgents?.data || []).find((a: any) => a.id === val);
+                                                    if (agentObj) {
+                                                        setFormAgentName(agentObj.name);
+                                                    } else {
+                                                        const staffObj = (db?.staff?.data || []).find((s: any) => s.employeeId === val);
+                                                        setFormAgentName(staffObj ? staffObj.name : '');
+                                                    }
                                                 }}
-                                                className={`w-full pl-3 pr-8 py-3 bg-slate-50 border rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 appearance-none cursor-pointer hover:bg-white transition-all ${
-                                                    phoneError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-200'
-                                                }`}
+                                                className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 appearance-none transition-all"
                                             >
-                                                {COUNTRY_PHONE_DATA.map(c => (
-                                                    <option key={c.code} value={c.code}>
-                                                        {getCountryPhoneLabel(c.code)}
-                                                    </option>
-                                                ))}
+                                                <option value="">{userRole === 'admin' ? 'Direct / Unassigned' : 'Me (Direct Handling)'}</option>
+                                                {userRole === 'admin' ? (
+                                                    (db?.travelAgents?.data || []).map((agent: any) => (
+                                                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                                                    ))
+                                                ) : (
+                                                    <>
+                                                        {filterStaffForAgentSession(db?.staff?.data || [], currentAgentId, db).map((member: any) => (
+                                                            <option key={member.id} value={member.employeeId}>Staff: {member.name} ({member.role})</option>
+                                                        ))}
+                                                        {(db?.travelAgents?.data || []).filter((a: any) => a.parentId === currentAgentId).map((subAgent: any) => (
+                                                            <option key={subAgent.id} value={subAgent.id}>Sub-Agent: {subAgent.name}</option>
+                                                        ))}
+                                                    </>
+                                                )}
                                             </select>
+                                            <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-crm-500 transition-colors" />
                                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                                                 <DropdownChevron size={14} />
                                             </div>
                                         </div>
-                                        <div className="relative flex-1">
-                                            <input
-                                                type="tel"
-                                                inputMode="numeric"
-                                                autoComplete="tel-national"
-                                                required
-                                                value={formPhone}
-                                                onChange={(e) => {
-                                                    setFormPhone(sanitizeLocalPhoneDigits(e.target.value, formCountryCode));
-                                                    setPhoneError('');
-                                                }}
-                                                className={`w-full px-3 py-3 pr-14 bg-slate-50 border rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all font-mono tracking-widest ${
-                                                    phoneError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-200'
-                                                }`}
-                                                placeholder={`${getPhoneDigitLimit(formCountryCode)} digits`}
-                                                aria-invalid={Boolean(phoneError)}
-                                                aria-describedby={phoneError ? 'quote-phone-error' : undefined}
-                                            />
-                                            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
-                                                    formPhone.length === getPhoneDigitLimit(formCountryCode)
-                                                        ? 'bg-emerald-100 text-emerald-700'
-                                                        : 'bg-slate-200 text-slate-500'
-                                                }`}>
-                                                    {formPhone.length}/{getPhoneDigitLimit(formCountryCode)}
-                                                </span>
+                                    </div>
+                                    <div>
+                                        <label className="form-label">Client Mobile</label>
+                                        <div className="flex gap-2">
+                                            <div className="relative w-[7.5rem] shrink-0 group crm-select-wrap">
+                                                <select
+                                                    value={formCountryCode}
+                                                    onChange={(e) => {
+                                                        setFormCountryCode(e.target.value);
+                                                        setFormPhone('');
+                                                        setPhoneError('');
+                                                    }}
+                                                    className={`w-full pl-2.5 pr-7 py-2.5 bg-white border rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 appearance-none cursor-pointer transition-all ${
+                                                        phoneError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-200'
+                                                    }`}
+                                                >
+                                                    {COUNTRY_PHONE_DATA.map(c => (
+                                                        <option key={c.code} value={c.code}>
+                                                            {getCountryPhoneLabel(c.code)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                                    <DropdownChevron size={12} />
+                                                </div>
+                                            </div>
+                                            <div className="relative flex-1 min-w-0">
+                                                <input
+                                                    type="tel"
+                                                    inputMode="numeric"
+                                                    autoComplete="tel-national"
+                                                    required
+                                                    value={formPhone}
+                                                    onChange={(e) => {
+                                                        setFormPhone(sanitizeLocalPhoneDigits(e.target.value, formCountryCode));
+                                                        setPhoneError('');
+                                                    }}
+                                                    className={`w-full px-3 py-2.5 pr-12 bg-white border rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all font-mono tracking-wider ${
+                                                        phoneError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-200'
+                                                    }`}
+                                                    placeholder={`${getPhoneDigitLimit(formCountryCode)} digits`}
+                                                    aria-invalid={Boolean(phoneError)}
+                                                    aria-describedby={phoneError ? 'quote-phone-error' : undefined}
+                                                />
+                                                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                        formPhone.length === getPhoneDigitLimit(formCountryCode)
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'bg-slate-100 text-slate-500'
+                                                    }`}>
+                                                        {formPhone.length}/{getPhoneDigitLimit(formCountryCode)}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
+                                        {phoneError && (
+                                            <p id="quote-phone-error" className="mt-1.5 text-xs font-semibold text-rose-600">
+                                                {phoneError}
+                                            </p>
+                                        )}
                                     </div>
-                                    {phoneError && (
-                                        <p id="quote-phone-error" className="mt-2 text-xs font-semibold text-rose-600">
-                                            {phoneError}
-                                        </p>
-                                    )}
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
+
+                                {/* Row 2: Adults · Kids · Kids Ages · Package Duration · Departure Date */}
+                                <div className="grid grid-cols-2 md:grid-cols-[0.7fr_0.7fr_1.3fr_1.4fr_1.3fr] gap-4">
                                     <div>
                                         <label className="form-label">Adults</label>
                                         <NumberInput
                                             min={1}
                                             value={formAdults}
                                             onChange={e => setFormAdults(parseInt(e.target.value) || 1)}
-                                            className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-center font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all"
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-center font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all"
                                         />
                                     </div>
                                     <div>
@@ -4458,135 +4474,190 @@ const Quotations = () => {
                                                 const parsed = parseKidsAges(formKidsAges).slice(0, val);
                                                 setFormKidsAges(parsed.join(', '));
                                             }}
-                                            className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-center font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all"
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-center font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all"
                                         />
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="form-label">Kids Ages</label>
-                                    <input
-                                        type="text"
-                                        value={formKidsAges}
-                                        onChange={e => {
-                                            const raw = e.target.value.replace(/[^0-9,\s]/g, '');
-                                            setFormKidsAges(raw);
-                                            const parsed = parseKidsAges(raw);
-                                            if (parsed.length !== formKids && parsed.length > 0) {
-                                                setFormKids(parsed.length);
-                                            }
-                                            if (raw.trim().length === 0) {
-                                                setFormKids(0);
-                                            }
-                                        }}
-                                        className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all"
-                                        placeholder="e.g. 4, 8"
-                                    />
-                                    <p className="form-hint">Use comma-separated ages. Pricing adjusts by age bands.</p>
-                                </div>
-                                <div>
-                                    <label className="form-label">
-                                        Package duration
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <div className="relative crm-select-wrap w-[96px] shrink-0">
-                                        <select
-                                            value={formTripDurationUnit}
-                                            onChange={(e) => {
-                                                const unit = e.target.value as 'nights' | 'days';
-                                                const displayVal =
-                                                    unit === 'nights' ? resolvedTripNights : resolvedTripDays;
-                                                handleTripDurationChange(displayVal, unit);
-                                            }}
-                                            className="w-full px-2 py-3 pr-7 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white appearance-none cursor-pointer"
-                                        >
-                                            <option value="nights">Nights</option>
-                                            <option value="days">Days</option>
-                                        </select>
-                                        <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                        </div>
-                                        <NumberInput
-                                            min={1}
-                                            max={60}
-                                            value={formTripDurationValue}
-                                            onChange={(e) =>
-                                                handleTripDurationChange(
-                                                    Math.max(1, parseInt(e.target.value, 10) || 1)
-                                                )
-                                            }
-                                            className="flex-1 min-w-0 px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 text-center outline-none focus:border-crm-500 hover:bg-white transition-all"
-                                        />
-                                    </div>
-                                    <p className="text-[10px] text-slate-400 mt-1">
-                                        {resolvedTripNights} night{resolvedTripNights !== 1 ? 's' : ''} ·{' '}
-                                        {resolvedTripDays} day{resolvedTripDays !== 1 ? 's' : ''} — sets itinerary length
-                                        {tripMode === 'package' && livePreset?.duration ? (
-                                            <span className="text-slate-500">
-                                                {' '}
-                                                (template: {livePreset.duration})
-                                            </span>
-                                        ) : null}
-                                    </p>
-                                </div>
-                                <div>
-                                    <label className="form-label">Departure Date</label>
-                                    <div
-                                        className="relative cursor-pointer"
-                                        onClick={openDepartureDatePicker}
-                                        role="presentation"
-                                    >
+                                    <div>
+                                        <label className="form-label">Kids Ages</label>
                                         <input
-                                            ref={departureDateRef}
-                                            type="date"
-                                            required
-                                            value={formDepartureDate}
-                                            onChange={(e) => setFormDepartureDate(e.target.value)}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (typeof e.currentTarget.showPicker === 'function') {
-                                                    try {
-                                                        e.currentTarget.showPicker();
-                                                    } catch {
-                                                        /* unsupported */
-                                                    }
+                                            type="text"
+                                            value={formKidsAges}
+                                            onChange={e => {
+                                                const raw = e.target.value.replace(/[^0-9,\s]/g, '');
+                                                setFormKidsAges(raw);
+                                                const parsed = parseKidsAges(raw);
+                                                if (parsed.length !== formKids && parsed.length > 0) {
+                                                    setFormKids(parsed.length);
+                                                }
+                                                if (raw.trim().length === 0) {
+                                                    setFormKids(0);
                                                 }
                                             }}
-                                            className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all"
+                                            placeholder="e.g, 4, 8"
                                         />
+                                        <p className="form-hint">Use comma-separated ages. Pricing adjusts by age bands.</p>
+                                    </div>
+                                    <div>
+                                        <label className="form-label">Package Duration</label>
+                                        <div className="flex gap-2">
+                                            <div className="relative crm-select-wrap flex-1 min-w-0">
+                                                <select
+                                                    value={formTripDurationUnit}
+                                                    onChange={(e) => {
+                                                        const unit = e.target.value as 'nights' | 'days';
+                                                        const displayVal =
+                                                            unit === 'nights' ? resolvedTripNights : resolvedTripDays;
+                                                        handleTripDurationChange(displayVal, unit);
+                                                    }}
+                                                    className="w-full px-2.5 py-2.5 pr-7 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 appearance-none cursor-pointer"
+                                                >
+                                                    <option value="nights">Nights</option>
+                                                    <option value="days">Days</option>
+                                                </select>
+                                                <DropdownChevron size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                            </div>
+                                            <NumberInput
+                                                min={1}
+                                                max={60}
+                                                value={formTripDurationValue}
+                                                onChange={(e) =>
+                                                    handleTripDurationChange(
+                                                        Math.max(1, parseInt(e.target.value, 10) || 1)
+                                                    )
+                                                }
+                                                className="w-14 shrink-0 px-2 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 text-center outline-none focus:border-crm-500 transition-all"
+                                            />
+                                        </div>
+                                        <p className="form-hint">
+                                            {resolvedTripNights} night{resolvedTripNights !== 1 ? 's' : ''} ·{' '}
+                                            {resolvedTripDays} day{resolvedTripDays !== 1 ? 's' : ''} — sets itinerary length
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <label className="form-label">Departure Date</label>
+                                        <div
+                                            className="relative cursor-pointer"
+                                            onClick={openDepartureDatePicker}
+                                            role="presentation"
+                                        >
+                                            <input
+                                                ref={departureDateRef}
+                                                type="date"
+                                                required
+                                                value={formDepartureDate}
+                                                onChange={(e) => setFormDepartureDate(e.target.value)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (typeof e.currentTarget.showPicker === 'function') {
+                                                        try {
+                                                            e.currentTarget.showPicker();
+                                                        } catch {
+                                                            /* unsupported */
+                                                        }
+                                                    }
+                                                }}
+                                                className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="form-label">Include Flight</label>
-                                    <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormNeedFlight(true)}
-                                            className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                                                formNeedFlight ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                            }`}
-                                        >
-                                            Yes
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setFormNeedFlight(false);
-                                                setFormFlightMeal((prev) => ({ ...prev, optIn: false }));
-                                                setCustomFlightTotal(null);
-                                            }}
-                                            className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                                                !formNeedFlight ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                            }`}
-                                        >
-                                            No
-                                        </button>
+
+                                {/* Row 3: Include Flight · Destination Country */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="form-label">Include Flight</label>
+                                        <div className="flex p-1 bg-slate-50 rounded-xl border border-slate-200">
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormNeedFlight(true)}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                    formNeedFlight
+                                                        ? 'bg-crm-50 text-crm-600 shadow-sm'
+                                                        : 'text-slate-500 hover:text-slate-700 bg-white'
+                                                }`}
+                                            >
+                                                Yes
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setFormNeedFlight(false);
+                                                    setFormFlightMeal((prev) => ({ ...prev, optIn: false }));
+                                                    setCustomFlightTotal(null);
+                                                }}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                    !formNeedFlight
+                                                        ? 'bg-crm-50 text-crm-600 shadow-sm'
+                                                        : 'text-slate-500 hover:text-slate-700 bg-white'
+                                                }`}
+                                            >
+                                                No
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="form-label">Destination Country</label>
+                                        <div className="relative z-[2]">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    setIsRegionDropdownOpen(!isRegionDropdownOpen);
+                                                    if (!isRegionDropdownOpen) setBuilderCountrySearch('');
+                                                }}
+                                                className="w-full flex items-center justify-between px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl hover:border-crm-400 transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group relative z-[2]"
+                                            >
+                                                <div className="flex items-center gap-2 overflow-hidden min-w-0">
+                                                    {builderCountry ? (
+                                                        <CountryFlag country={builderCountry} size={18} />
+                                                    ) : (
+                                                        <Globe size={16} className="text-slate-400 shrink-0" />
+                                                    )}
+                                                    <span className={`text-sm font-semibold truncate ${builderCountry ? 'text-slate-700' : 'text-slate-400'}`}>
+                                                        {builderCountry || 'Select Country'}
+                                                    </span>
+                                                </div>
+                                                <DropdownChevron open={isRegionDropdownOpen} className="text-slate-400" size={14} />
+                                            </button>
+
+                                            {isRegionDropdownOpen && (
+                                                <>
+                                                    <div className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]" onClick={() => setIsRegionDropdownOpen(false)}></div>
+                                                    <div className="absolute top-full left-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="p-3 border-b border-slate-100">
+                                                            <div className="relative">
+                                                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                                <input
+                                                                    type="text"
+                                                                    value={builderCountrySearch}
+                                                                    onChange={(e) => setBuilderCountrySearch(e.target.value)}
+                                                                    placeholder="Search countries..."
+                                                                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-crm-500"
+                                                                    autoFocus
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="p-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                                            <CountryGroupedOptions
+                                                                options={filteredCountryOptions}
+                                                                selected={builderCountry}
+                                                                onSelect={handleBuilderCountrySelect}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
+
+                                {/* Flight extras — only when Include Flight = Yes */}
                                 {formNeedFlight && (
-                                    <>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1 border-t border-slate-100 animate-in fade-in slide-in-from-top-2 duration-300">
                                         <div>
-                                            <label className="form-label">
-                                                Source Country
-                                            </label>
+                                            <label className="form-label">Source Country</label>
                                             <div className="relative">
                                                 <button
                                                     type="button"
@@ -4598,7 +4669,7 @@ const Quotations = () => {
                                                             return !open;
                                                         });
                                                     }}
-                                                    className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all cursor-pointer"
+                                                    className="w-full flex items-center justify-between px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 hover:border-crm-400 transition-all cursor-pointer"
                                                 >
                                                     <div className="flex items-center gap-2 overflow-hidden min-w-0">
                                                         <CountryFlag country={formSourceCountry} size={18} />
@@ -4614,7 +4685,7 @@ const Quotations = () => {
                                                 {isSourceCountryDropdownOpen && (
                                                     <>
                                                         <div className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]" onClick={() => setIsSourceCountryDropdownOpen(false)}/>
-                                                        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200" onClick={(e) => e.stopPropagation()}>
                                                             <div className="p-2 border-b border-slate-100">
                                                                 <div className="relative">
                                                                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -4641,161 +4712,108 @@ const Quotations = () => {
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="form-label">
-                                                Departure Airport
-                                            </label>
+                                            <label className="form-label">Departure Airport</label>
                                             <div className="relative crm-select-wrap">
-                                            <select
-                                                value={formSourceAirport}
-                                                onChange={(e) => setFormSourceAirport(e.target.value)}
-                                                className="w-full px-3 py-3 pr-10 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all appearance-none cursor-pointer"
-                                            >
-                                                {sourceAirportOptions.length === 0 ? (
-                                                    <option value={formSourceAirport || ''}>
-                                                        {formSourceAirport || 'Select airport'}
-                                                    </option>
-                                                ) : (
-                                                    <>
-                                                        {!sourceAirportOptions.some(
-                                                            (opt) => opt.value === formSourceAirport
-                                                        ) &&
-                                                            formSourceAirport && (
-                                                                <option value={formSourceAirport}>
-                                                                    {formSourceAirport}
+                                                <select
+                                                    value={formSourceAirport}
+                                                    onChange={(e) => setFormSourceAirport(e.target.value)}
+                                                    className="w-full px-3 py-2.5 pr-10 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all appearance-none cursor-pointer"
+                                                >
+                                                    {sourceAirportOptions.length === 0 ? (
+                                                        <option value={formSourceAirport || ''}>
+                                                            {formSourceAirport || 'Select airport'}
+                                                        </option>
+                                                    ) : (
+                                                        <>
+                                                            {!sourceAirportOptions.some(
+                                                                (opt) => opt.value === formSourceAirport
+                                                            ) &&
+                                                                formSourceAirport && (
+                                                                    <option value={formSourceAirport}>
+                                                                        {formSourceAirport}
+                                                                    </option>
+                                                                )}
+                                                            {sourceAirportOptions.map((opt) => (
+                                                                <option key={opt.value} value={opt.value}>
+                                                                    {opt.label}
                                                                 </option>
-                                                            )}
-                                                        {sourceAirportOptions.map((opt) => (
-                                                            <option key={opt.value} value={opt.value}>
-                                                                {opt.label}
-                                                            </option>
-                                                        ))}
-                                                    </>
-                                                )}
-                                            </select>
-                                            <DropdownChevron size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                            ))}
+                                                        </>
+                                                    )}
+                                                </select>
+                                                <DropdownChevron size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                             </div>
                                         </div>
-                                    </>
-                                )}
-                                {formNeedFlight && (
-                                    <div>
-                                        <label className="form-label">Flight Price</label>
-                                        <div className="relative">
-                                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">
-                                                {currencySymbol}
-                                            </span>
-                                            <NumberInput
-                                                min={0}
-                                                step={priceInputStep}
-                                                value={customFlightTotal ? formatInputValue(customFlightTotal) : ''}
-                                                onChange={(e) => {
-                                                    const val = parseInputValue(e.target.value);
-                                                    setCustomFlightTotal(val > 0 ? val : null);
-                                                }}
-                                                placeholder="Enter total flight price"
-                                                className="w-full pl-8 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 tabular-nums text-right outline-none focus:border-crm-500 hover:bg-white transition-all"
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 mt-1">
-                                            Total flight cost for this quote. Leave blank to use the default calculated rate.
-                                        </p>
-                                    </div>
-                                )}
-                                {formNeedFlight && (
-                                    <div>
-                                        <label className="form-label">Flight Meals</label>
-                                        <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
-                                            <button
-                                                type="button"
-                                                onClick={() => setFormFlightMeal((prev) => ({ ...prev, optIn: true }))}
-                                                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                                                    formFlightMeal.optIn ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                                }`}
-                                            >
-                                                Yes
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setFormFlightMeal((prev) => ({ ...prev, optIn: false }))}
-                                                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                                                    !formFlightMeal.optIn ? 'bg-white text-crm-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                                }`}
-                                            >
-                                                No
-                                            </button>
-                                        </div>
-                                        {formFlightMeal.optIn && (
-                                            <div className="relative crm-select-wrap mt-2">
-                                            <select
-                                                value={formFlightMeal.type}
-                                                onChange={(e) =>
-                                                    setFormFlightMeal((prev) => ({
-                                                        ...prev,
-                                                        type: e.target.value as 'Veg' | 'Non-Veg' | 'Vegan',
-                                                    }))
-                                                }
-                                                className="w-full px-3 py-2.5 pr-9 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-crm-500 hover:bg-white transition-all appearance-none cursor-pointer"
-                                            >
-                                                <option value="Veg">Veg</option>
-                                                <option value="Non-Veg">Non-Veg</option>
-                                                <option value="Vegan">Vegan</option>
-                                            </select>
-                                            <DropdownChevron size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                <div className={`${tripMode === 'package' ? 'lg:col-span-1' : 'lg:col-span-1'}`}>
-                                    <label className="form-label">Destination Country</label>
-                                    <div className="relative z-[2]">
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setIsRegionDropdownOpen(!isRegionDropdownOpen);
-                                                if (!isRegionDropdownOpen) setBuilderCountrySearch('');
-                                            }}
-                                            className="w-full flex items-center justify-between px-4 py-[11px] bg-slate-50 border border-slate-200 rounded-2xl shadow-sm hover:border-crm-400 transition-all focus:ring-2 focus:ring-crm-500/20 outline-none group relative z-[2]"
-                                        >
-                                            <div className="flex items-center gap-2 overflow-hidden">
-                                                <CountryFlag country={builderCountry || null} size={22} global={!builderCountry} />
-                                                <span className={`text-xs font-black uppercase truncate ${builderCountry ? 'text-slate-700' : 'text-slate-400'}`}>
-                                                    {builderCountry || 'Select Country'}
+                                        <div>
+                                            <label className="form-label">Flight Price</label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">
+                                                    {currencySymbol}
                                                 </span>
+                                                <NumberInput
+                                                    min={0}
+                                                    step={priceInputStep}
+                                                    value={customFlightTotal ? formatInputValue(customFlightTotal) : ''}
+                                                    onChange={(e) => {
+                                                        const val = parseInputValue(e.target.value);
+                                                        setCustomFlightTotal(val > 0 ? val : null);
+                                                    }}
+                                                    placeholder="Enter total flight price"
+                                                    className="w-full pl-8 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 tabular-nums text-right outline-none focus:border-crm-500 transition-all"
+                                                />
                                             </div>
-                                            <DropdownChevron open={isRegionDropdownOpen} className="text-slate-400" size={14} />
-                                        </button>
-
-                                        {isRegionDropdownOpen && (
-                                            <>
-                                                <div className="fixed inset-0 z-[2500] bg-slate-900/5 backdrop-blur-[1px]" onClick={() => setIsRegionDropdownOpen(false)}></div>
-                                                <div className="absolute bottom-full left-0 mb-2 w-80 bg-white border border-slate-200 rounded-[1.5rem] shadow-2xl z-[2600] overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300" onClick={(e) => e.stopPropagation()}>
-                                                    <div className="p-3 border-b border-slate-100">
-                                                        <div className="relative">
-                                                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                            <input
-                                                                type="text"
-                                                                value={builderCountrySearch}
-                                                                onChange={(e) => setBuilderCountrySearch(e.target.value)}
-                                                                placeholder="Search countries..."
-                                                                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-crm-500"
-                                                                autoFocus
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-2 max-h-[300px] overflow-y-auto custom-scrollbar">
-                                                        <CountryGroupedOptions
-                                                            options={filteredCountryOptions}
-                                                            selected={builderCountry}
-                                                            onSelect={handleBuilderCountrySelect}
-                                                        />
-                                                    </div>
+                                            <p className="form-hint">
+                                                Leave blank to use the default calculated rate.
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="form-label">Flight Meals</label>
+                                            <div className="flex p-1 bg-slate-50 rounded-xl border border-slate-200">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormFlightMeal((prev) => ({ ...prev, optIn: true }))}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                        formFlightMeal.optIn
+                                                            ? 'bg-crm-50 text-crm-600 shadow-sm'
+                                                            : 'text-slate-500 hover:text-slate-700 bg-white'
+                                                    }`}
+                                                >
+                                                    Yes
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormFlightMeal((prev) => ({ ...prev, optIn: false }))}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                        !formFlightMeal.optIn
+                                                            ? 'bg-crm-50 text-crm-600 shadow-sm'
+                                                            : 'text-slate-500 hover:text-slate-700 bg-white'
+                                                    }`}
+                                                >
+                                                    No
+                                                </button>
+                                            </div>
+                                            {formFlightMeal.optIn && (
+                                                <div className="relative crm-select-wrap mt-2">
+                                                    <select
+                                                        value={formFlightMeal.type}
+                                                        onChange={(e) =>
+                                                            setFormFlightMeal((prev) => ({
+                                                                ...prev,
+                                                                type: e.target.value as 'Veg' | 'Non-Veg' | 'Vegan',
+                                                            }))
+                                                        }
+                                                        className="w-full px-3 py-2 pr-9 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-crm-500 transition-all appearance-none cursor-pointer"
+                                                    >
+                                                        <option value="Veg">Veg</option>
+                                                        <option value="Non-Veg">Non-Veg</option>
+                                                        <option value="Vegan">Vegan</option>
+                                                    </select>
+                                                    <DropdownChevron size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                                 </div>
-                                            </>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
                             )}
 
@@ -5697,7 +5715,7 @@ const Quotations = () => {
                             )}
 
                             {builderStep === 'itinerary' && (
-                            <div className="space-y-6 border-t border-slate-100 pt-8">
+                            <div className="space-y-4 border-t border-slate-100 pt-4">
                                 <div className="p-4 bg-white border border-slate-200 rounded-2xl">
                                     <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
                                         <div className="flex-1 min-w-0">
@@ -5984,25 +6002,25 @@ const Quotations = () => {
 
                                         <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar pb-10">
                                             {filteredVaultActivities.map(act => {
-                                                    const isAssigned =
-                                                        !isFreeDayActivity(act) &&
-                                                        assignedActivityKeys.has(getActivityAssignmentKey(act));
+                                                    const isAssignedOnceOnly =
+                                                        isOnceOnlyActivity(act) &&
+                                                        assignedOnceOnlyActivityKeys.has(getActivityAssignmentKey(act));
                                                     return (
                                                     <div
                                                         key={act.id}
-                                                        draggable={!isAssigned}
+                                                        draggable={!isAssignedOnceOnly}
                                                         onDragStart={() => {
-                                                            if (!isAssigned) setDraggedActivity(act);
+                                                            if (!isAssignedOnceOnly) setDraggedActivity(act);
                                                         }}
                                                         className={`p-3 border rounded-xl transition-all group ${
-                                                            isAssigned
+                                                            isAssignedOnceOnly
                                                                 ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed'
                                                                 : 'bg-white border-slate-200 cursor-grab active:cursor-grabbing hover:border-crm-300 hover:shadow-md'
                                                         }`}
                                                     >
                                                         <div className="flex justify-between items-start mb-1">
                                                             <span className="text-[11px] font-bold text-slate-800 line-clamp-1">{act.title}</span>
-                                                            {isAssigned ? (
+                                                            {isAssignedOnceOnly ? (
                                                                 <span className="text-[9px] font-black uppercase text-slate-400 shrink-0 ml-1">Assigned</span>
                                                             ) : isFreeDayActivity(act) ? (
                                                                 <span className="text-[9px] font-black uppercase text-emerald-600 shrink-0 ml-1">Reusable</span>
@@ -6326,28 +6344,28 @@ const Quotations = () => {
                                         </div>
                                         <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                                             {filteredPickerActivities.map((act) => {
-                                                const isAssigned =
-                                                    !isFreeDayActivity(act) &&
-                                                    assignedActivityKeys.has(getActivityAssignmentKey(act));
-                                                return (
+                                                    const isAssignedOnceOnly =
+                                                        isOnceOnlyActivity(act) &&
+                                                        assignedOnceOnlyActivityKeys.has(getActivityAssignmentKey(act));
+                                                    return (
                                                     <button
                                                         key={act.id}
                                                         type="button"
-                                                        disabled={isAssigned}
+                                                        disabled={isAssignedOnceOnly}
                                                         onClick={() => {
-                                                            if (isAssigned) return;
+                                                            if (isAssignedOnceOnly) return;
                                                             const added = addActivityToItineraryDay(activityPickerDayIndex, act);
                                                             if (added) setActivityPickerDayIndex(null);
                                                         }}
                                                         className={`w-full text-left p-3 rounded-xl border transition-all ${
-                                                            isAssigned
+                                                            isAssignedOnceOnly
                                                                 ? 'bg-slate-50 border-slate-100 opacity-55 cursor-not-allowed'
                                                                 : 'bg-white border-slate-200 hover:border-crm-300 hover:bg-crm-50/40 active:scale-[0.99]'
                                                         }`}
                                                     >
                                                         <div className="flex justify-between items-start gap-2 mb-1">
                                                             <span className="text-sm font-bold text-slate-800">{act.title}</span>
-                                                            {isAssigned ? (
+                                                            {isAssignedOnceOnly ? (
                                                                 <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Assigned</span>
                                                             ) : (
                                                                 <span className="text-xs font-bold text-crm-600 shrink-0">{formatMoney(act.price)}</span>
@@ -6358,13 +6376,13 @@ const Quotations = () => {
                                                             {isFreeDayActivity(act) && (
                                                                 <span className="text-[10px] font-bold text-emerald-600">Reusable</span>
                                                             )}
-                                                            {isAssigned && (
+                                                            {isAssignedOnceOnly && (
                                                                 <span className="text-[10px] text-slate-400">Already in itinerary</span>
                                                             )}
                                                         </div>
                                                     </button>
-                                                );
-                                            })}
+                                                    );
+                                                })}
                                             {filteredPickerActivities.length === 0 && (
                                                 <p className="py-8 text-center text-xs text-slate-400 font-medium">
                                                     No activities match your search
