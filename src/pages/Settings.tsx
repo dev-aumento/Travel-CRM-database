@@ -192,7 +192,11 @@ const Settings = () => {
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden">
                 <div className="flex border-b border-slate-200 overflow-x-auto shrink-0">
-                    {TABS.map((tab) => (
+                    {TABS.filter((tab) => {
+                        if (tab.id === 'integrations') return userRole === 'admin' || hasPlanFeature('agencyEmail');
+                        if (tab.id === 'banking') return userRole === 'admin' || hasPlanFeature('bankDetails');
+                        return true;
+                    }).map((tab) => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}

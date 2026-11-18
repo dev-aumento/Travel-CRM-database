@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PLATFORM_NAME } from '../constants/platform';
 import { User, Mail, Lock, LogIn, ArrowRight, Key, Shield, X, AlertCircle, Globe, Settings, Users, ChevronRight, LayoutDashboard, UserPlus, Briefcase, ChevronLeft, Zap } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
@@ -17,6 +17,14 @@ import {
     normalizeLoginEmail,
 } from '../utils/authLogin';
 import { getAssignedPermissions, SUB_AGENT_STAFF_PERMISSIONS } from '../utils/permissions';
+import { buildApprovalPlanFields } from '../utils/agentPlan';
+import { type BillingCycle, formatInrPlanPrice, getPlanPriceInr, isFreePlan } from '../utils/planPricing';
+import { planFeatureFields } from '../utils/planFeatures';
+import { clearPendingPlanSignup, readPendingPlanSignup, savePendingPlanSignup } from '../utils/pendingPlanSignup';
+import { createRazorpayCheckout, loadRazorpayCheckout } from '../utils/razorpayCheckout';
+
+type AuthMode = 'portal_selection' | 'login' | 'register' | 'forgot' | 'otp' | 'staff_login';
+type PortalType = 'admin' | 'agent' | null;
 
 interface LoginProps {
     onLogin: (
@@ -30,15 +38,17 @@ interface LoginProps {
         }
     ) => void;
     initialPortal?: 'admin' | null;
+    initialMode?: AuthMode;
 }
 
-type AuthMode = 'portal_selection' | 'login' | 'register' | 'forgot' | 'otp' | 'staff_login';
-type PortalType = 'admin' | 'agent' | null;
-
-const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMode }) => {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { db, addRecord, getNextId, mongoConnected } = useDatabase();
-    const [mode, setMode] = useState<AuthMode>(initialPortal ? 'login' : 'portal_selection');
+    const queryPlan = searchParams.get('plan')?.trim() || '';
+    const [mode, setMode] = useState<AuthMode>(
+        initialPortal ? 'login' : queryPlan || initialMode === 'register' ? 'register' : 'portal_selection'
+    );
     const [portalType, setPortalType] = useState<PortalType>(initialPortal);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -52,6 +62,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [devOtp, setDevOtp] = useState<string | null>(null);
+    const [selectedPlanName, setSelectedPlanName] = useState(queryPlan);
+    const [selectedCycle, setSelectedCycle] = useState<BillingCycle>(
+        searchParams.get('cycle') === 'yearly' ? 'yearly' : 'monthly'
+    );
+    const paymentSettled = React.useRef(false);
+
+    React.useEffect(() => {
+        const planName = searchParams.get('plan')?.trim() || '';
+        if (!planName) return;
+        const billingCycle: BillingCycle = searchParams.get('cycle') === 'yearly' ? 'yearly' : 'monthly';
+        savePendingPlanSignup({ planName, billingCycle });
+        setSelectedPlanName(planName);
+        setSelectedCycle(billingCycle);
+        setPortalType('agent');
+        setMode('register');
+    }, [searchParams]);
+
+    const selectedPlan = (db?.plans?.data || []).find((plan: any) => plan.name === selectedPlanName);
+    const selectedPlanPrice = selectedPlan ? getPlanPriceInr(selectedPlan, selectedCycle) : 0;
 
     React.useEffect(() => {
         if (sessionStorage.getItem(LOGIN_BLOCK_REASON_KEY)) {
@@ -212,13 +241,177 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
         }, 1500);
     };
 
-    const handleRegister = (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsLoading(true);
+    const openRegister = (options?: { keepPlan?: boolean }) => {
+        if (!options?.keepPlan) {
+            clearPendingPlanSignup();
+            setSelectedPlanName('');
+        }
+        setPortalType('agent');
+        setMode('register');
         setError(null);
-        if (password !== confirmPassword) { setError('Passwords do not match.'); setIsLoading(false); return; }
-        const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-        setTimeout(() => { setMode('otp'); setDevOtp(newOtp); setIsLoading(false); setSuccessMessage(`Security code sent to ${email}`); }, 1500);
+    };
+
+    const createAgentAccount = (
+        planName: string,
+        cycle: BillingCycle,
+        payment?: { paymentId: string; orderId: string }
+    ) => {
+        const newId = getNextId('travelAgents', 'AGT');
+        const normalizedEmail = email.trim().toLowerCase();
+        const plans = db?.plans?.data || [];
+        const selected = plans.find((item: any) => item.name === planName);
+        const planFields = buildApprovalPlanFields(
+            { plan: planName, billingCycle: cycle, isTrial: false },
+            plans
+        );
+        const periodDays = cycle === 'yearly' ? 365 : 30;
+        addRecord('travelAgents', {
+            id: newId,
+            name,
+            email: normalizedEmail,
+            password,
+            status: 'approved',
+            joinedDate: new Date().toISOString().split('T')[0],
+            businessName: `${name} Agencies`,
+            plan: planName,
+            ...planFeatureFields(selected),
+            parentId: null,
+            planRenewedAt: new Date().toISOString(),
+            ...(payment
+                ? { razorpayPaymentId: payment.paymentId, razorpayOrderId: payment.orderId }
+                : {}),
+            ...planFields,
+            billingCycle: cycle,
+            isTrial: false,
+            trialEndsAt: null,
+            planExpiresAt: new Date(Date.now() + periodDays * 24 * 60 * 60 * 1000).toISOString(),
+        });
+        clearPendingPlanSignup();
+        onLogin(normalizedEmail, 'agent', newId, {
+            requireOnboarding: true,
+            sessionUserId: newId,
+        });
+    };
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        if (password !== confirmPassword) {
+            setError('Passwords do not match.');
+            return;
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const emailTaken = (db?.travelAgents?.data || []).some(
+            (agent: any) => normalizeLoginEmail(agent.email) === normalizedEmail
+        );
+        if (emailTaken) {
+            setError('An agency already uses this email. Log in instead.');
+            return;
+        }
+
+        const pending = readPendingPlanSignup();
+        const planName = selectedPlanName || pending?.planName || '';
+        const cycle: BillingCycle = selectedPlanName ? selectedCycle : pending?.billingCycle || 'monthly';
+        const plan = (db?.plans?.data || []).find((item: any) => item.name === planName);
+
+        if (planName && !plan) {
+            setError('That plan is no longer available. Choose another plan.');
+            return;
+        }
+
+        if (!plan || isFreePlan(plan) || getPlanPriceInr(plan, cycle) <= 0) {
+            setIsLoading(true);
+            const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+            setTimeout(() => {
+                setMode('otp');
+                setDevOtp(newOtp);
+                setIsLoading(false);
+                setSuccessMessage(`Security code sent to ${email}`);
+            }, 1500);
+            return;
+        }
+
+        setIsLoading(true);
+        paymentSettled.current = false;
+        const signupRef = `signup${Date.now()}`;
+
+        try {
+            const orderRes = await fetch('/api/payments/razorpay/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ planName: plan.name, billingCycle: cycle, agentId: signupRef }),
+            });
+            const order = await orderRes.json().catch(() => ({}));
+            if (!orderRes.ok) {
+                throw new Error(order.error || 'Could not start the Razorpay payment.');
+            }
+            if (order.free) {
+                createAgentAccount(plan.name, cycle);
+                return;
+            }
+
+            const loaded = await loadRazorpayCheckout();
+            if (!loaded) {
+                throw new Error('Could not load the Razorpay payment window. Check your connection and try again.');
+            }
+
+            const checkout = createRazorpayCheckout({
+                key: order.keyId,
+                amount: order.amount,
+                currency: order.currency || 'INR',
+                name: PLATFORM_NAME,
+                description: `${plan.name} plan · ${cycle === 'yearly' ? 'Yearly' : 'Monthly'}`,
+                order_id: order.orderId,
+                prefill: { name, email: normalizedEmail },
+                theme: { color: '#0284c7' },
+                modal: {
+                    ondismiss: () => {
+                        if (!paymentSettled.current) setIsLoading(false);
+                    },
+                },
+                handler: async (response) => {
+                    paymentSettled.current = true;
+                    try {
+                        const verifyRes = await fetch('/api/payments/razorpay/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                planName: order.planName || plan.name,
+                                billingCycle: order.billingCycle || cycle,
+                                agentId: signupRef,
+                            }),
+                        });
+                        const verified = await verifyRes.json().catch(() => ({}));
+                        if (!verifyRes.ok) {
+                            throw new Error(verified.error || 'Payment could not be verified.');
+                        }
+                        createAgentAccount(
+                            verified.planName || plan.name,
+                            verified.billingCycle === 'yearly' ? 'yearly' : 'monthly',
+                            { paymentId: verified.paymentId, orderId: verified.orderId }
+                        );
+                    } catch (verifyError) {
+                        console.error('Signup payment verification failed:', verifyError);
+                        setError(verifyError instanceof Error ? verifyError.message : 'Payment could not be verified.');
+                        setIsLoading(false);
+                    }
+                },
+            });
+            checkout.on('payment.failed', (failed) => {
+                paymentSettled.current = true;
+                setIsLoading(false);
+                setError(failed?.error?.description || 'Payment failed. Please try again.');
+            });
+            checkout.open();
+        } catch (paymentError) {
+            console.error('Signup payment failed:', paymentError);
+            setError(paymentError instanceof Error ? paymentError.message : 'Could not start the payment.');
+            setIsLoading(false);
+        }
     };
 
     const handleVerifyOtp = (e: React.FormEvent) => {
@@ -230,6 +423,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
             const newId = getNextId('travelAgents', 'AGT');
             const normalizedEmail = email.trim().toLowerCase();
             const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+            const litePlan = (db?.plans?.data || []).find((item: any) => item.name === 'Lite');
             addRecord('travelAgents', {
                 id: newId,
                 name,
@@ -239,6 +433,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
                 joinedDate: new Date().toISOString().split('T')[0],
                 businessName: `${name} Agencies`,
                 plan: 'Lite',
+                ...planFeatureFields(litePlan),
                 isTrial: true,
                 trialEndsAt,
                 parentId: null,
@@ -305,6 +500,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
                     </button>
                 </div>
 
+                <button type="button" onClick={() => navigate('/pricing')} className="mt-8 text-sm font-bold text-crm-600 hover:text-crm-700">
+                    View pricing
+                </button>
+
                 <div className="mt-12 max-w-4xl w-full px-4 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300">
                     <div className="bg-gradient-to-r from-crm-600 to-indigo-700 rounded-[32px] p-8 text-white flex flex-col lg:flex-row items-center justify-between gap-6 shadow-2xl shadow-crm-200/50 relative overflow-hidden group">
                         <div className="relative z-10 flex items-center gap-6">
@@ -317,7 +516,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
                             </div>
                         </div>
                         <button 
-                            onClick={() => { setPortalType('agent'); setMode('register'); }}
+                            onClick={() => openRegister()}
                             className="relative z-10 px-8 py-4 bg-white text-crm-600 font-black rounded-xl hover:bg-slate-50 transition-all shadow-lg active:scale-95 whitespace-nowrap"
                         >
                             Start 30-Day Free Trial
@@ -413,7 +612,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
                                 {portalType === 'agent' && (
                                     <div className="space-y-4 pt-4">
                                         <button type="button" onClick={() => setMode('staff_login')} className="w-full flex items-center justify-center gap-2 text-xs font-bold text-slate-500 hover:text-crm-600"><Briefcase size={16}/> Employee Login ID</button>
-                                        <button type="button" onClick={() => setMode('register')} className="w-full text-xs font-bold text-crm-600 underline underline-offset-4">Join as New Agent</button>
+                                        <button type="button" onClick={() => openRegister()} className="w-full text-xs font-bold text-crm-600 underline underline-offset-4">Join as New Agent</button>
                                     </div>
                                 )}
                             </form>
@@ -438,11 +637,25 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null }) => {
 
                         {mode === 'register' && (
                             <form onSubmit={handleRegister} className="space-y-4">
+                                {selectedPlanName && (
+                                    <div className="p-4 rounded-2xl bg-crm-50 border border-crm-100">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-crm-600">Selected plan</p>
+                                        <p className="mt-1 text-sm font-bold text-slate-800">
+                                            {selectedPlanName} · {selectedCycle === 'yearly' ? 'Yearly' : 'Monthly'}
+                                            {selectedPlan ? ` · ${formatInrPlanPrice(selectedPlanPrice)}` : ''}
+                                        </p>
+                                        <button type="button" onClick={() => navigate('/pricing')} className="mt-2 text-xs font-bold text-crm-600 underline underline-offset-4">
+                                            Change plan
+                                        </button>
+                                    </div>
+                                )}
                                 <div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Legal Name</label><div className="relative"><User className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none" /></div></div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Business Email</label><div className="relative"><Mail className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none" /></div></div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Set Password</label><div className="relative"><Lock className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none" /></div></div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Confirm Password</label><div className="relative"><Key className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none" /></div></div>
-                                <button type="submit" disabled={isLoading} className="w-full py-4 bg-crm-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest mt-4 shadow-xl">Join as Travel Agent</button>
+                                <button type="submit" disabled={isLoading} className="w-full py-4 bg-crm-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest mt-4 shadow-xl">
+                                    {isLoading && selectedPlan ? 'Opening payment...' : 'Join as Travel Agent'}
+                                </button>
                                 <button type="button" onClick={() => setMode('login')} className="w-full text-xs font-bold text-slate-400 mt-6">Already Enrolled? Login</button>
                             </form>
                         )}

@@ -8,6 +8,7 @@ import {
     type BillingCycle,
     formatPlanPrice,
     getPlanPeriodLabel,
+    getPlanPriceInr,
     getPlatformInrPerUsd,
     getYearlySavingsPercent,
     isFreePlan,
@@ -15,7 +16,11 @@ import {
     useInrUsdRate,
     useViewerPlanCurrency,
 } from '../utils/planPricing';
-import { PLAN_FEATURES, getPlanFeatureKeys } from '../utils/planFeatures';
+import { PLAN_FEATURES, getPlanFeatureKeys, planFeatureFields } from '../utils/planFeatures';
+import { PLATFORM_NAME } from '../constants/platform';
+import PlanCardSlider from '../components/PlanCardSlider';
+import PlanFeatureList from '../components/PlanFeatureList';
+import { createRazorpayCheckout, loadRazorpayCheckout } from '../utils/razorpayCheckout';
 
 const Plans = () => {
     const { db, updateRecord } = useDatabase();
@@ -33,6 +38,7 @@ const Plans = () => {
     const [billingCycle, setBillingCycle] = React.useState<BillingCycle>('monthly');
     const [upgradingTo, setUpgradingTo] = React.useState<string | null>(null);
     const [showSuccess, setShowSuccess] = React.useState(false);
+    const paymentSettled = React.useRef(false);
     const syncSubAgentPlans = (planName: string, planFields: Record<string, unknown> = {}) => {
         if (!currentAgent?.id) return;
         const subAgents = (db.travelAgents?.data || []).filter(
@@ -46,7 +52,44 @@ const Plans = () => {
         });
     };
 
-    const handleUpgrade = (planName: string) => {
+    const applyPaidPlan = (
+        planName: string,
+        cycle: BillingCycle,
+        payment?: { paymentId: string; orderId: string }
+    ) => {
+        if (!currentAgent) return;
+        const plans = db.plans?.data || [];
+        const selected = plans.find((item: any) => item.name === planName);
+        const planFields = buildApprovalPlanFields(
+            { ...currentAgent, plan: planName, isTrial: false, billingCycle: cycle },
+            plans
+        );
+        updateRecord('travelAgents', currentAgent.id, {
+            plan: planName,
+            ...planFeatureFields(selected),
+            billingCycle: cycle,
+            planRenewedAt: new Date().toISOString(),
+            isTrial: false,
+            trialEndsAt: null,
+            ...(payment
+                ? {
+                      razorpayPaymentId: payment.paymentId,
+                      razorpayOrderId: payment.orderId,
+                  }
+                : {}),
+            ...planFields,
+        });
+        syncSubAgentPlans(planName, {
+            isTrial: false,
+            trialEndsAt: null,
+            ...planFeatureFields(selected),
+            ...planFields,
+        });
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+    };
+
+    const handleUpgrade = async (planName: string) => {
         if (userRole !== 'agent') {
             alert('Only Agency Owners can manage subscriptions.');
             return;
@@ -56,54 +99,122 @@ const Plans = () => {
             alert('Agency record not found. Please try logging in again.');
             return;
         }
-        
+
+        const selectedPlan = (db.plans?.data || []).find((plan: any) => plan.name === planName);
+        const cycle = billingCycle;
+
+        if (!selectedPlan || isFreePlan(selectedPlan) || getPlanPriceInr(selectedPlan, cycle) <= 0) {
+            applyPaidPlan(planName, cycle);
+            return;
+        }
+
         setUpgradingTo(planName);
-        
-        // Simulate a premium processing delay
-        setTimeout(() => {
-            try {
-                if (currentAgent) {
-                    const planFields = buildApprovalPlanFields(
-                        { ...currentAgent, plan: planName, isTrial: false, billingCycle },
-                        db.plans?.data || []
-                    );
-                    updateRecord('travelAgents', currentAgent.id, {
-                        plan: planName,
-                        billingCycle,
-                        planRenewedAt: new Date().toISOString(),
-                        isTrial: false,
-                        trialEndsAt: null,
-                        ...planFields,
-                    });
-                    syncSubAgentPlans(planName, {
-                        isTrial: false,
-                        trialEndsAt: null,
-                        ...planFields,
-                    });
-                    setShowSuccess(true);
-                    // Hide success message after 3 seconds
-                    setTimeout(() => setShowSuccess(false), 3000);
-                }
-            } catch (error) {
-                console.error('Upgrade failed:', error);
-                alert('Upgrade failed. Please try again.');
-            } finally {
-                setUpgradingTo(null);
+        paymentSettled.current = false;
+
+        try {
+            const orderRes = await fetch('/api/payments/razorpay/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    planName,
+                    billingCycle: cycle,
+                    agentId: currentAgent.id,
+                }),
+            });
+            const order = await orderRes.json().catch(() => ({}));
+            if (!orderRes.ok) {
+                throw new Error(order.error || 'Could not start the Razorpay payment.');
             }
-        }, 1500);
+            if (order.free) {
+                applyPaidPlan(planName, cycle);
+                setUpgradingTo(null);
+                return;
+            }
+
+            const loaded = await loadRazorpayCheckout();
+            if (!loaded) {
+                throw new Error('Could not load the Razorpay payment window. Check your connection and try again.');
+            }
+
+            const contact = String(currentAgent.phone || '').replace(/[^\d]/g, '');
+            const checkout = createRazorpayCheckout({
+                key: order.keyId,
+                amount: order.amount,
+                currency: order.currency || 'INR',
+                name: PLATFORM_NAME,
+                description: `${planName} plan · ${cycle === 'yearly' ? 'Yearly' : 'Monthly'}`,
+                order_id: order.orderId,
+                prefill: {
+                    name: currentAgent.name || currentAgent.businessName || '',
+                    email: currentAgent.email || userEmail || '',
+                    contact,
+                },
+                theme: { color: '#0284c7' },
+                modal: {
+                    ondismiss: () => {
+                        if (!paymentSettled.current) setUpgradingTo(null);
+                    },
+                },
+                handler: async (response) => {
+                    paymentSettled.current = true;
+                    try {
+                        const verifyRes = await fetch('/api/payments/razorpay/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                planName: order.planName,
+                                billingCycle: order.billingCycle,
+                                agentId: currentAgent.id,
+                            }),
+                        });
+                        const verified = await verifyRes.json().catch(() => ({}));
+                        if (!verifyRes.ok) {
+                            throw new Error(verified.error || 'Payment could not be verified.');
+                        }
+                        applyPaidPlan(verified.planName || planName, verified.billingCycle === 'yearly' ? 'yearly' : 'monthly', {
+                            paymentId: verified.paymentId,
+                            orderId: verified.orderId,
+                        });
+                    } catch (error) {
+                        console.error('Payment verification failed:', error);
+                        alert(error instanceof Error ? error.message : 'Payment could not be verified.');
+                    } finally {
+                        setUpgradingTo(null);
+                    }
+                },
+            });
+
+            checkout.on('payment.failed', (failed) => {
+                paymentSettled.current = true;
+                setUpgradingTo(null);
+                alert(failed?.error?.description || 'Payment failed. Please try again.');
+            });
+            checkout.open();
+        } catch (error) {
+            console.error('Upgrade failed:', error);
+            alert(error instanceof Error ? error.message : 'Upgrade failed. Please try again.');
+            setUpgradingTo(null);
+        }
     };
 
     const handleStartTrial = (planName: string) => {
         if (!currentAgent) return;
+        const selected = (db.plans?.data || []).find((item: any) => item.name === planName);
+        const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         updateRecord('travelAgents', currentAgent.id, {
             plan: planName,
+            ...planFeatureFields(selected),
             isTrial: true,
-            trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            trialEndsAt,
             planRenewedAt: new Date().toISOString(),
         });
         syncSubAgentPlans(planName, {
+            ...planFeatureFields(selected),
             isTrial: true,
-            trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            trialEndsAt,
         });
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
@@ -128,13 +239,12 @@ const Plans = () => {
         color: p.name === 'Lite' ? 'blue' : p.name === 'Growth' ? 'crm' : 'amber',
         popular: p.name === 'Growth',
         limits: {
-            staff: 'Unlimited',
-            subAgents: 'Unlimited',
-            quotations: 'Unlimited'
+            staff: getPlanFeatureKeys(p).has('teamStaff') ? 'Unlimited' : 'Not included',
+            subAgents: getPlanFeatureKeys(p).has('subAgents') ? 'Unlimited' : 'Not included',
         },
         // Exactly the features this plan unlocks (matches what the agency gets after choosing it)
         features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
-        buttonText: p.name === currentAgentPlan ? `Switch to ${billingCycle} billing` : `Upgrade to ${p.name}`
+        buttonText: 'Continue with this plan'
     }));
     const maxYearlySavings = Math.max(0, ...plans.map((p: any) => p.yearlySavings));
 
@@ -149,7 +259,7 @@ const Plans = () => {
                         </div>
                         <div>
                             <p className="text-sm font-black tracking-tight">Success!</p>
-                            <p className="text-[11px] text-slate-400 font-medium">Your plan has been updated successfully.</p>
+                            <p className="text-[11px] text-slate-400 font-medium">Your plan is active.</p>
                         </div>
                     </div>
                 </div>
@@ -220,7 +330,7 @@ const Plans = () => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-7xl mx-auto w-full pb-12">
+            <PlanCardSlider className="max-w-7xl mx-auto w-full pb-12">
                 {plans.map((plan: any) => {
                     // Paid plans are only "current" on the tab matching the agent's billing cycle
                     const isCurrent =
@@ -287,8 +397,8 @@ const Plans = () => {
                                             </div>
                                             <span className="text-sm font-bold text-slate-600">Team Staff</span>
                                         </div>
-                                        <span className={`text-sm font-black ${plan.limits.staff === 'Unlimited' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                            {plan.limits.staff} Users
+                                        <span className={`text-sm font-black ${plan.limits.staff === 'Unlimited' ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                            {plan.limits.staff === 'Unlimited' ? 'Unlimited Users' : 'Not included'}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
@@ -298,12 +408,8 @@ const Plans = () => {
                                             </div>
                                             <span className="text-sm font-bold text-slate-600">Sub-Agents</span>
                                         </div>
-                                        <span className={`text-sm font-black ${plan.limits.subAgents === 'Unlimited' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                            {plan.limits.subAgents === 'Unlimited'
-                                                ? 'Unlimited'
-                                                : plan.limits.subAgents === 0
-                                                  ? 'None'
-                                                  : `${plan.limits.subAgents} Agents`}
+                                        <span className={`text-sm font-black ${plan.limits.subAgents === 'Unlimited' ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                            {plan.limits.subAgents === 'Unlimited' ? 'Unlimited' : 'Not included'}
                                         </span>
                                     </div>
                                 </div>
@@ -324,7 +430,7 @@ const Plans = () => {
                                     {isCurrent ? 'Your Active Plan' : upgradingTo === plan.name ? (
                                         <div className="flex items-center gap-2">
                                             <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-                                            Processing...
+                                            Opening payment...
                                         </div>
                                     ) : plan.buttonText}
                                     {!isCurrent && !upgradingTo && <ChevronRight size={18} />}
@@ -342,21 +448,12 @@ const Plans = () => {
 
                             <div className="flex-1 bg-slate-50/50 p-8 border-t border-slate-100">
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">What's Included</h4>
-                                <ul className="space-y-4">
-                                    {plan.features.map((feature: any, i: number) => (
-                                        <li key={i} className="flex items-start gap-3">
-                                            <div className="mt-1 w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                                                <Check className="text-emerald-600" size={12} strokeWidth={3} />
-                                            </div>
-                                            <span className="text-sm text-slate-600 font-medium leading-tight">{feature}</span>
-                                        </li>
-                                    ))}
-                                </ul>
+                                <PlanFeatureList features={plan.features} />
                             </div>
                         </div>
                     );
                 })}
-            </div>
+            </PlanCardSlider>
 
             {/* Help Section */}
             <div className="mt-4 p-8 bg-white border border-slate-100 rounded-[32px] flex flex-col md:flex-row items-center justify-between gap-6 max-w-7xl w-full mx-auto shadow-sm">

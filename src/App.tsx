@@ -15,6 +15,7 @@ import Onboarding from './pages/Onboarding';
 import Finance from './pages/Finance';
 import AdminSubscriptionFinance from './pages/AdminSubscriptionFinance';
 import Plans from './pages/Plans';
+import PublicPricing from './pages/PublicPricing';
 import TermsConditions from './pages/TermsConditions';
 import PlanFeatureLocked from './components/PlanFeatureLocked';
 import { DatabaseProvider, useDatabase } from './context/DatabaseContext';
@@ -165,6 +166,8 @@ function AppContent() {
   if (!isAuthenticated) {
     return (
       <Routes>
+        <Route path="/pricing" element={<PublicPricing />} />
+        <Route path="/register" element={<Login onLogin={handleLogin} initialMode="register" />} />
         <Route path="/admin/login" element={<Login onLogin={handleLogin} initialPortal="admin" />} />
         <Route path="*" element={<Login onLogin={handleLogin} />} />
       </Routes>
@@ -209,6 +212,8 @@ function AppContent() {
 
   return (
     <Routes>
+      <Route path="/pricing" element={<PublicPricing />} />
+      <Route path="/register" element={<Navigate to="/plans" replace />} />
       <Route element={<SystemLayout onLogout={handleLogout} userRole={userRole} userPermissions={userPermissions} />}>
         <Route path="/" element={planGate('/', <Dashboard />)} />
         <Route

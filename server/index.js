@@ -9,6 +9,7 @@ import express from 'express';
 import connectDB from './config/db.js';
 import databaseRoutes from './routes/database.js';
 import recordRoutes from './routes/records.js';
+import razorpayRoutes from './routes/razorpay.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distPath = path.join(__dirname, '..', 'dist');
@@ -34,6 +35,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use('/api', databaseRoutes);
 app.use('/api', recordRoutes);
+app.use('/api', razorpayRoutes);
 
 const sendDevHelpPage = (res) => {
     res.status(503).type('html').send(`<!doctype html>

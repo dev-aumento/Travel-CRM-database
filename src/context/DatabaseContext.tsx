@@ -384,7 +384,7 @@ const hydrateParsedDatabase = (parsed: any, options: HydrateOptions = {}) => {
 
     if (parsed.settings?.data?.length) {
         parsed.settings.data = parsed.settings.data.map((setting: any) => {
-            const legacyNames = new Set(['Lord Shiva', 'Lord Shiva Admin']);
+            const legacyNames = new Set(['Lord Shiva', 'Lord Shiva Admin', 'SAP Travel CRM']);
             if (legacyNames.has(setting?.agencyName)) {
                 return { ...setting, agencyName: PLATFORM_NAME };
             }

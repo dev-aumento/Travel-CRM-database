@@ -1,1 +1,1 @@
-export const PLATFORM_NAME = 'SAP Travel CRM';
+export const PLATFORM_NAME = 'THE AVKAS';

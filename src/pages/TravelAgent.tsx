@@ -977,7 +977,7 @@ const TravelAgent = () => {
                 )}
 
                 {/* AGENT / STAFF: Staff Management */}
-                {canManageStaffTeam && activeTab === 'staff' && (
+                {canManageStaffTeam && activeTab === 'staff' && hasPlanFeature('teamStaff') && (
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-xl font-bold text-slate-800">Your Team Accounts</h2>
@@ -1138,7 +1138,7 @@ const TravelAgent = () => {
                 )}
 
                 {/* AGENT: Sub-Agent Management */}
-                {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && (
+                {userRole === 'agent' && !isSubAgentSession && activeTab === 'sub-agents' && hasPlanFeature('subAgents') && (
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-xl font-bold text-slate-800">Your Sub-Agent Network</h2>

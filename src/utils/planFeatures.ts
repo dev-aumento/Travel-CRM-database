@@ -57,14 +57,24 @@ export const getPlanFeatureLabels = (plan: any): string[] => {
 };
 
 /**
- * Feature keys a plan unlocks. Plans saved before features were selectable
- * (no catalog feature ticked) keep full access until the admin configures them.
+ * Feature keys a plan unlocks.
+ * A blank `features` field is a legacy plan and keeps full access.
+ * Once features are saved, only the ticked catalog items are included.
  */
 export const getPlanFeatureKeys = (plan: any): Set<PlanFeatureKey> => {
+    const raw = String(plan?.features ?? '').trim();
+    if (!raw) return new Set(ALL_PLAN_FEATURE_KEYS);
     const labels = getPlanFeatureLabels(plan);
-    if (labels.length === 0) return new Set(ALL_PLAN_FEATURE_KEYS);
     return new Set(PLAN_FEATURES.filter((f) => labels.includes(f.label)).map((f) => f.key));
 };
+
+/** Comma-separated labels of the features currently ticked on a plan. */
+export const getSelectedPlanFeatureString = (plan: any): string => getPlanFeatureLabels(plan).join(',');
+
+/** Fields copied onto an agency when they buy or change a plan. */
+export const planFeatureFields = (plan: any): { planFeatures: string } => ({
+    planFeatures: plan ? getSelectedPlanFeatureString(plan) : '',
+});
 
 /** Features available to the session's agency (main agency plan applies to sub-agents and staff). */
 export const getAgencyPlanFeatures = (
@@ -73,10 +83,13 @@ export const getAgencyPlanFeatures = (
 ): Set<PlanFeatureKey> => {
     if (opts.userRole === 'admin') return new Set(ALL_PLAN_FEATURE_KEYS);
     const agency = resolveMainAgencyAgent(db, opts);
-    const planName = agency?.plan || 'Lite';
-    const plan = (db?.plans?.data || []).find((p: any) => p.name === planName);
-    if (!plan) return new Set(ALL_PLAN_FEATURE_KEYS);
-    return getPlanFeatureKeys(plan);
+    const planName = String(agency?.plan || 'Lite').trim().toLowerCase();
+    const plans = db?.plans?.data || [];
+    const plan = plans.find((p: any) => String(p?.name || '').trim().toLowerCase() === planName);
+    if (plan) return getPlanFeatureKeys(plan);
+    if (agency?.planFeatures) return getPlanFeatureKeys({ features: agency.planFeatures });
+    if (plans.length === 0) return new Set(ALL_PLAN_FEATURE_KEYS);
+    return new Set();
 };
 
 export const canAccessRouteOnPlan = (features: Set<PlanFeatureKey>, path: string): boolean => {
