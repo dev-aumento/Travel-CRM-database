@@ -284,7 +284,7 @@ export const buildLibraryItinerary = (input: AiItineraryInput): AiItineraryDraft
             }
         }
     } else {
-        const queue = [];
+        const queue: typeof pool = [];
         const seen = new Set<string>();
         for (const activity of pool) {
             const key = activityReuseKey(activity);
