@@ -17,6 +17,7 @@ import {
     useViewerPlanCurrency,
 } from '../utils/planPricing';
 import { PLAN_FEATURES, getPlanFeatureKeys, planFeatureFields } from '../utils/planFeatures';
+import { subscriptionPaymentFields } from '../utils/agentSubscriptionFinance';
 import { PLATFORM_NAME } from '../constants/platform';
 import PlanCardSlider from '../components/PlanCardSlider';
 import PlanFeatureList from '../components/PlanFeatureList';
@@ -55,7 +56,7 @@ const Plans = () => {
     const applyPaidPlan = (
         planName: string,
         cycle: BillingCycle,
-        payment?: { paymentId: string; orderId: string }
+        payment?: { paymentId: string; orderId: string; amountInr?: number }
     ) => {
         if (!currentAgent) return;
         const plans = db.plans?.data || [];
@@ -71,13 +72,8 @@ const Plans = () => {
             planRenewedAt: new Date().toISOString(),
             isTrial: false,
             trialEndsAt: null,
-            ...(payment
-                ? {
-                      razorpayPaymentId: payment.paymentId,
-                      razorpayOrderId: payment.orderId,
-                  }
-                : {}),
             ...planFields,
+            ...subscriptionPaymentFields(payment),
         });
         syncSubAgentPlans(planName, {
             isTrial: false,
@@ -177,6 +173,7 @@ const Plans = () => {
                         applyPaidPlan(verified.planName || planName, verified.billingCycle === 'yearly' ? 'yearly' : 'monthly', {
                             paymentId: verified.paymentId,
                             orderId: verified.orderId,
+                            amountInr: Number(verified.amountInr ?? Number(order.amount) / 100),
                         });
                     } catch (error) {
                         console.error('Payment verification failed:', error);

@@ -20,6 +20,7 @@ import { getAssignedPermissions, SUB_AGENT_STAFF_PERMISSIONS } from '../utils/pe
 import { buildApprovalPlanFields } from '../utils/agentPlan';
 import { type BillingCycle, formatInrPlanPrice, getPlanPriceInr, isFreePlan } from '../utils/planPricing';
 import { planFeatureFields } from '../utils/planFeatures';
+import { subscriptionPaymentFields } from '../utils/agentSubscriptionFinance';
 import { clearPendingPlanSignup, readPendingPlanSignup, savePendingPlanSignup } from '../utils/pendingPlanSignup';
 import { createRazorpayCheckout, loadRazorpayCheckout } from '../utils/razorpayCheckout';
 
@@ -254,7 +255,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
     const createAgentAccount = (
         planName: string,
         cycle: BillingCycle,
-        payment?: { paymentId: string; orderId: string }
+        payment?: { paymentId: string; orderId: string; amountInr?: number }
     ) => {
         const newId = getNextId('travelAgents', 'AGT');
         const normalizedEmail = email.trim().toLowerCase();
@@ -277,10 +278,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
             ...planFeatureFields(selected),
             parentId: null,
             planRenewedAt: new Date().toISOString(),
-            ...(payment
-                ? { razorpayPaymentId: payment.paymentId, razorpayOrderId: payment.orderId }
-                : {}),
             ...planFields,
+            ...subscriptionPaymentFields(payment),
             billingCycle: cycle,
             isTrial: false,
             trialEndsAt: null,
@@ -392,7 +391,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                         createAgentAccount(
                             verified.planName || plan.name,
                             verified.billingCycle === 'yearly' ? 'yearly' : 'monthly',
-                            { paymentId: verified.paymentId, orderId: verified.orderId }
+                            {
+                                paymentId: verified.paymentId,
+                                orderId: verified.orderId,
+                                amountInr: Number(verified.amountInr ?? Number(order.amount) / 100),
+                            }
                         );
                     } catch (verifyError) {
                         console.error('Signup payment verification failed:', verifyError);
@@ -467,10 +470,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
         return (
             <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-crm-100/20 via-slate-50 to-white">
                 <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-crm-600 rounded-3xl shadow-2xl shadow-crm-200 mb-6">
-                        <Shield className="text-white" size={40} />
-                    </div>
-                    <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-3">{PLATFORM_NAME}</h1>
+                    <img src="/new-favicon.png" alt="" className="w-20 h-20 rounded-3xl shadow-2xl shadow-crm-200 mb-6 object-cover mx-auto" />
                     <p className="text-slate-500 font-semibold text-lg">Identity Access Management</p>
                 </div>
 
@@ -561,10 +561,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                 )}
 
                 <div className="text-center mb-8 animate-in fade-in zoom-in duration-500">
-                    <div className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4 ${portalType === 'admin' ? 'bg-white text-slate-900' : 'bg-crm-600 text-white shadow-crm-200'}`}>
-                        {portalType === 'admin' ? <LayoutDashboard size={32} /> : <Users size={32} />}
-                    </div>
-                    <h1 className={`text-3xl font-black tracking-tight ${portalType === 'admin' ? 'text-white' : 'text-slate-900'}`}>{PLATFORM_NAME}</h1>
+                    {portalType === 'admin' ? (
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4 bg-white text-slate-900">
+                            <LayoutDashboard size={32} />
+                        </div>
+                    ) : (
+                        <img src="/new-favicon.png" alt="" className="w-16 h-16 rounded-2xl shadow-lg shadow-crm-200 mb-4 object-cover mx-auto" />
+                    )}
+                    {portalType === 'admin' ? (
+                        <h1 className="text-3xl font-black tracking-tight text-white">{PLATFORM_NAME}</h1>
+                    ) : (
+                        <img src="/crm-logo.png" alt={PLATFORM_NAME} className="h-12 mx-auto object-contain" />
+                    )}
                     <p className={`mt-2 font-bold uppercase tracking-widest text-xs ${portalType === 'admin' ? 'text-crm-400' : 'text-slate-500'}`}>
                         {mode === 'staff_login' ? 'Staff Entry Terminal' : portalType === 'admin' ? 'System Administrator' : 'Licensed Agent'}
                     </p>
@@ -656,7 +664,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                                 <button type="submit" disabled={isLoading} className="w-full py-4 bg-crm-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest mt-4 shadow-xl">
                                     {isLoading && selectedPlan ? 'Opening payment...' : 'Join as Travel Agent'}
                                 </button>
-                                <button type="button" onClick={() => setMode('login')} className="w-full text-xs font-bold text-slate-400 mt-6">Already Enrolled? Login</button>
+                                <button type="button" onClick={() => setMode('login')} className="w-full text-xs font-bold text-slate-400 mt-6">Already have an account ? Login</button>
                             </form>
                         )}
 

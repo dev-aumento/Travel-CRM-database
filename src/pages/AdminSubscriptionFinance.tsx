@@ -191,7 +191,7 @@ const AdminSubscriptionFinance = () => {
                         Financial Control Center
                     </h1>
                     <p className="text-slate-500 text-sm font-medium">
-                        Subscription revenue from agents on paid plans (Growth & Enterprise)
+                        Subscription revenue from agents on paid plans, including Lite
                     </p>
                 </div>
                 <button
@@ -279,7 +279,7 @@ const AdminSubscriptionFinance = () => {
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Outstanding</p>
                     <h3 className="text-3xl font-black text-amber-600">{formatCurrency(reportMetrics.pendingAmount)}</h3>
                     <div className="mt-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
-                        Trials & renewals due
+                        Renewals due
                     </div>
                 </div>
                 <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm border-l-4 border-l-crm-500">
@@ -432,7 +432,7 @@ const AdminSubscriptionFinance = () => {
                                                     No subscriptions in this period
                                                 </p>
                                                 <p className="text-slate-400 text-xs max-w-sm">
-                                                    Only agents on Growth or Enterprise plans appear here. Lite (free) agents are excluded.
+                                                    Paid subscriptions in this period appear here. Trial plans are not billed and are left out.
                                                 </p>
                                             </div>
                                         </td>

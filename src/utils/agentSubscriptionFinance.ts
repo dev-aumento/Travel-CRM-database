@@ -36,31 +36,67 @@ export const parsePlanPrice = (priceStr?: string): number => {
     return parseInt(digits, 10) || 0;
 };
 
-/** Main agency agents on a paid plan (Growth / Enterprise), not free Lite */
+/** Main-agency subscriptions, including paid Lite. Sub-agents and rejected agencies are excluded. */
 export const hasAgentPurchasedPlan = (agent: any): boolean => {
     if (!isMainAgencyAgent(agent)) return false;
     if (agent?.status === 'rejected') return false;
-    const plan = agent?.plan || 'Lite';
-    return plan !== 'Lite';
+    return Boolean(agent?.plan);
+};
+
+/** Staying on a trial is not a purchase, even after the trial end date, until a payment is recorded. */
+export const isUnpaidTrialSubscription = (agent: any): boolean =>
+    Boolean(agent?.isTrial) && !agent?.razorpayPaymentId;
+
+/** Amount captured when the agency paid. Later plan-price edits must not replace this. */
+export const readSubscriptionPaidInr = (agent: any): number | null => {
+    const value = agent?.subscriptionPaidInr;
+    if (value === '' || value == null) return null;
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
+};
+
+export const subscriptionPaymentFields = (payment?: {
+    paymentId?: string;
+    orderId?: string;
+    amountInr?: number;
+}) => {
+    if (!payment?.paymentId) return {};
+    const amount = Number(payment.amountInr);
+    return {
+        razorpayPaymentId: payment.paymentId,
+        razorpayOrderId: payment.orderId,
+        ...(Number.isFinite(amount) && amount >= 0 ? { subscriptionPaidInr: amount } : {}),
+    };
 };
 
 export const getAgentSubscriptionPayment = (agent: any, planCatalog: any[] = []): AgentSubscriptionPayment => {
     const planName = agent?.plan || 'Lite';
     const planMeta = planCatalog.find((p: any) => p.name === planName);
-    const total = planMeta ? getPlanPriceInr(planMeta, normalizeBillingCycle(agent?.billingCycle)) : 0;
+    const catalogTotal = planMeta ? getPlanPriceInr(planMeta, normalizeBillingCycle(agent?.billingCycle)) : 0;
+    const paidAmount = readSubscriptionPaidInr(agent);
+    const total = paidAmount != null ? paidAmount : catalogTotal;
     const now = Date.now();
     const expiry = parseAgentDate(agent?.planExpiresAt);
-    const trialEnd = parseAgentDate(agent?.trialEndsAt);
 
     const format = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
-    if (agent?.isTrial && trialEnd != null && trialEnd > now) {
+    if (isUnpaidTrialSubscription(agent)) {
         return {
-            total,
+            total: 0,
             amountPaid: 0,
-            amountDue: total,
+            amountDue: 0,
             status: 'trial',
-            totalFormatted: format(total),
+            totalFormatted: format(0),
+        };
+    }
+
+    if (paidAmount != null) {
+        return {
+            total: paidAmount,
+            amountPaid: paidAmount,
+            amountDue: 0,
+            status: expiry != null && expiry < now ? 'unpaid' : 'paid',
+            totalFormatted: format(paidAmount),
         };
     }
 
@@ -98,7 +134,7 @@ export const buildAgentSubscriptionRows = (
     planCatalog: any[] = []
 ): AgentSubscriptionRow[] => {
     return agents
-        .filter(hasAgentPurchasedPlan)
+        .filter((agent) => hasAgentPurchasedPlan(agent) && !isUnpaidTrialSubscription(agent))
         .map((agent) => {
             const planName = agent.plan || 'Lite';
             const planMeta = planCatalog.find((p: any) => p.name === planName);
@@ -203,6 +239,7 @@ export const summarizeSubscriptionRows = (rows: AgentSubscriptionRow[]) => {
     let activeSubscriptions = 0;
 
     rows.forEach(({ payment, agent }) => {
+        if (payment.status === 'trial') return;
         totalRevenue += payment.total;
         collectedAmount += payment.amountPaid;
         pendingAmount += payment.amountDue;

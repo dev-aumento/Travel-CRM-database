@@ -160,6 +160,7 @@ router.post('/payments/razorpay/verify', async (req, res) => {
             agentId,
             paymentId,
             orderId,
+            amountInr: Number(payment.amount ?? order.amount ?? 0) / 100,
         });
     } catch (error) {
         console.error('Razorpay verify failed:', error);

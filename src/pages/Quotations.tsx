@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import NumberInput from '../components/NumberInput';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, Send, Download, Calculator, Plus, User, MapPin, CheckCircle2, Calendar, Globe, X, ChevronDown, ArrowLeft, ArrowRight, Search, GripVertical, Trash2, Edit3, Filter, Briefcase, Hotel as HotelIcon, Copy, Mail } from 'lucide-react';
+import { FileText, Send, Download, Calculator, Plus, User, MapPin, CheckCircle2, Calendar, Globe, X, ChevronDown, ArrowLeft, ArrowRight, Search, GripVertical, Trash2, Edit3, Filter, Briefcase, Hotel as HotelIcon, Copy, Mail, Sparkles } from 'lucide-react';
 import { buildNightPricesForStay, formatHotelNightDateLabel, getHotelSelectionIncompleteMessage, isHotelSelectionComplete, stayMissingExtraBedPrice, sumStayChildWithBedTotal, sumStayChildWithoutBedTotal, sumStayExtraBedTotal, sumStayGivenTotal, sumStayHotelTotal, sumStaySpecialInclusionsTotal, type HotelNightPrice } from '../utils/hotelStayPricing';
 import { collectReferenceIds, ensureHotelBookingId, ensureTripId } from '../utils/hotelBookingIds';
 import {
@@ -19,6 +19,7 @@ import {
     getQuotationsForLead,
 } from '../utils/databaseSync';
 import { PLATFORM_NAME } from '../constants/platform';
+import { draftDaysToFormItinerary, requestAiItinerary } from '../utils/aiItinerary';
 import HotelSpecialInclusionsSection, { type HotelSpecialInclusion } from '../components/HotelSpecialInclusionsSection';
 import QuoteEmailSendModal from '../components/QuoteEmailSendModal';
 import { usePlanFeatures } from '../utils/planFeatures';
@@ -815,6 +816,8 @@ const Quotations = () => {
     const [hotelSelectionConfirmed, setHotelSelectionConfirmed] = useState(false);
     const [hotelValidationAttempted, setHotelValidationAttempted] = useState(false);
     const [itineraryValidationAttempted, setItineraryValidationAttempted] = useState(false);
+    const [aiItineraryLoading, setAiItineraryLoading] = useState(false);
+    const [aiItineraryNote, setAiItineraryNote] = useState('');
     const [formQuoteNotes, setFormQuoteNotes] = useState('');
     const [formAdditionalActivities, setFormAdditionalActivities] = useState<QuoteAdditionalActivity[]>([]);
     const [formAdditionalServiceCharge, setFormAdditionalServiceCharge] =
@@ -2344,6 +2347,71 @@ const Quotations = () => {
         },
         [formItinerary]
     );
+
+    const handleCreateItineraryWithAi = async () => {
+        const dayCount = Math.max(1, formItinerary.length || resolvedTripDays);
+        const hasActivities = formItinerary.some((day) => (day.activities || []).length > 0);
+        if (hasActivities && !window.confirm('Replace the current day plan with an AI itinerary?')) {
+            return;
+        }
+
+        const libraryActivities = (allActivities || []).filter((activity) => {
+            const country = activity.country || 'Global';
+            return country === 'Global' || !builderCountry || matchesBuilderCountry(country);
+        });
+        const hotels = formHotelStays.map((stay) => {
+            const hotel = getHotelRecord(stay.hotelId);
+            return {
+                name: hotel?.name || stay.hotelInput || '',
+                city: stay.city || builderCity || '',
+                nights: stay.nights,
+            };
+        });
+        const travelers =
+            formKids > 0 ? `${formAdults} adults, ${formKids} kids` : `${formAdults} adults`;
+
+        setAiItineraryLoading(true);
+        setAiItineraryNote('');
+        const startedAt = Date.now();
+        try {
+            const result = await requestAiItinerary({
+                days: dayCount,
+                destination: builderDestination,
+                city: builderCity,
+                country: builderCountry,
+                departureDate: formDepartureDate,
+                travelers,
+                hotels,
+                activities: libraryActivities.map((activity) => ({
+                    id: activity.id,
+                    title: activity.title,
+                    description: activity.description,
+                    price: activity.price,
+                    category: activity.category,
+                    country: activity.country,
+                })),
+            });
+            // The library draft can return immediately. Keep the generating
+            // state on screen long enough that the days don't appear at once.
+            const minimumVisibleMs = 1600;
+            const remaining = minimumVisibleMs - (Date.now() - startedAt);
+            if (remaining > 0) {
+                await new Promise((resolve) => setTimeout(resolve, remaining));
+            }
+            setFormItinerary((prev) => draftDaysToFormItinerary(result.days, libraryActivities, prev));
+            setItineraryValidationAttempted(false);
+            setAiItineraryNote(
+                result.source === 'ai'
+                    ? 'Drafted with AI. Day 1 is arrival and the last day is departure. Review each day before you continue.'
+                    : 'Every day is filled. Day 1 is arrival and the last day is departure. Review the plan before you continue.'
+            );
+        } catch (error) {
+            console.error('AI itinerary failed:', error);
+            setAiItineraryNote('The itinerary could not be created. Please try again.');
+        } finally {
+            setAiItineraryLoading(false);
+        }
+    };
 
     const filteredVaultActivities = useMemo(() => {
         const query = activitySearch.trim().toLowerCase();
@@ -6061,15 +6129,40 @@ const Quotations = () => {
 
                                 {/* Main Itinerary Builder Area */}
                                 <div className="space-y-6">
-                                    <div className="flex items-center justify-between gap-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                                             <MapPin size={18} className="text-crm-600" /> Itinerary Design
                                         </h3>
+                                        <button
+                                            type="button"
+                                            onClick={handleCreateItineraryWithAi}
+                                            disabled={aiItineraryLoading}
+                                            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 disabled:opacity-60 transition-colors"
+                                        >
+                                            <Sparkles size={14} className={aiItineraryLoading ? 'animate-pulse' : ''} />
+                                            {aiItineraryLoading ? 'Generating itinerary' : 'Create itinerary with AI'}
+                                        </button>
                                     </div>
+                                    {aiItineraryNote && !aiItineraryLoading && (
+                                        <p className="text-[11px] font-medium text-slate-500 -mt-3">{aiItineraryNote}</p>
+                                    )}
+                                    {!aiItineraryLoading && (
                                     <p className="text-[11px] text-slate-500 lg:hidden -mt-3">
                                         Tap <span className="font-bold text-crm-600">+</span> on a day to add activities from the list.
                                     </p>
+                                    )}
 
+                                    {aiItineraryLoading ? (
+                                        <div className="rounded-2xl border-2 border-dashed border-crm-200 bg-crm-50/50 px-6 py-16 flex flex-col items-center justify-center text-center">
+                                            <span className="relative flex h-14 w-14 items-center justify-center mb-4">
+                                                <span className="absolute inset-0 rounded-full bg-crm-200/70 animate-ping" />
+                                                <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-white border border-crm-100 shadow-sm">
+                                                    <Sparkles size={22} className="text-crm-600 animate-pulse" />
+                                                </span>
+                                            </span>
+                                            <p className="text-sm font-semibold text-slate-800">Generating itinerary</p>
+                                        </div>
+                                    ) : (
                                     <div className="space-y-4">
                                         {formItinerary.map((day, idx) => (
                                             <div
@@ -6299,6 +6392,7 @@ const Quotations = () => {
                                             </div>
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                             </div>
                             </div>

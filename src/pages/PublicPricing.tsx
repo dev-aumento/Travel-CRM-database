@@ -64,15 +64,15 @@ const PublicPricing = () => {
         <div className="min-h-screen bg-slate-50 text-slate-800">
             <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-                    <button type="button" onClick={() => navigate('/')} className="text-lg font-black tracking-tight text-slate-900">
-                        {PLATFORM_NAME}
+                    <button type="button" onClick={() => navigate('/')} className="flex items-center" aria-label={PLATFORM_NAME}>
+                        <img src="/crm-logo.png" alt={PLATFORM_NAME} className="h-9 object-contain" />
                     </button>
                     <button
                         type="button"
                         onClick={() => navigate('/')}
                         className="px-4 py-2 rounded-xl text-sm font-bold text-crm-700 hover:bg-crm-50"
                     >
-                        Agent login
+                        Login
                     </button>
                 </div>
             </header>
