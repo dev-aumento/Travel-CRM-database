@@ -13,7 +13,7 @@ import {
 import { trackingIdsMatch } from './trackingId';
 import { parseDurationNights } from './pricing';
 import { quoteBelongsToLead } from './quoteActivities';
-import { getPlanFeatureKeys } from './planFeatures';
+import { getPlanFeatureKeys, resolvePlanStaffLimit } from './planFeatures';
 
 export type AgencyBranding = {
     name: string;
@@ -1227,26 +1227,40 @@ export const countAgencySubAgents = (
     ).length;
 };
 
-/** Staff and sub-agent slots are always unlimited. */
+/** Staff seats come from the agency plan. Sub-agent slots stay uncapped. */
 export const getAgencyPlanLimits = (
     db: any,
     sessionAgentId: string | null | undefined
 ): { planName: string; staff: number; subAgents: number } => {
     const mainAgent = resolveMainAgencyAgent(db, { sessionAgentId: sessionAgentId || '' });
     const planName = mainAgent?.plan || 'Lite';
+    const plan = (db?.plans?.data || []).find(
+        (item: any) => String(item?.name || '').trim().toLowerCase() === String(planName).trim().toLowerCase()
+    );
 
     return {
         planName,
-        staff: 9999,
+        staff: resolvePlanStaffLimit(plan || { name: planName }),
         subAgents: 9999,
     };
 };
 
-/** Staff slots are unlimited (same as sub-agents). */
+/** Block a new staff account once the plan's staff limit is full. */
 export const canAddAgencyStaff = (
-    _db: any,
-    _sessionAgentId: string | null | undefined
-): { allowed: boolean; message?: string } => ({ allowed: true });
+    db: any,
+    sessionAgentId: string | null | undefined
+): { allowed: boolean; message?: string } => {
+    const limits = getAgencyPlanLimits(db, sessionAgentId);
+    const used = countAgencyStaff(db, sessionAgentId);
+    if (limits.staff <= 0 || used >= limits.staff) {
+        const seats = limits.staff === 1 ? '1 team staff account' : `${limits.staff} team staff accounts`;
+        return {
+            allowed: false,
+            message: `The ${limits.planName} plan includes ${seats}. Remove a staff account or raise the staff limit for this plan in master admin.`,
+        };
+    }
+    return { allowed: true };
+};
 
 export const canAddAgencySubAgent = (
     _db: any,

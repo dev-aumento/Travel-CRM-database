@@ -25,6 +25,7 @@ import {
     resolveMainAgencyAgentId,
     isSubAgencyAgentSession,
     getAgencyPlanLimits,
+    canAddAgencyStaff,
     canSessionManageStaffMember,
 } from '../utils/databaseSync';
 import {
@@ -450,6 +451,11 @@ const TravelAgent = () => {
     };
 
     const openAddStaffModal = () => {
+        const staffCheck = canAddAgencyStaff(db, sessionAgentIdResolved);
+        if (!staffCheck.allowed) {
+            window.alert(staffCheck.message);
+            return;
+        }
         setStaffForm({
             name: '',
             employeeId: '',
@@ -852,7 +858,7 @@ const TravelAgent = () => {
                                 {isSubAgentSession ? 'Agency Staff Slots' : 'Staff Slots'}
                             </span>
                             <span className="text-xs font-bold text-crm-600">
-                                {agencyStaffCount}
+                                {agencyStaffCount} / {planLimits.staff}
                             </span>
                         </div>
                         {!isSubAgentSession && (

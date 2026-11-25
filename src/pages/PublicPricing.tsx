@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Shield, Zap, Crown, Users, UserPlus, ChevronRight } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
 import { sortPlansByPriceAsc } from '../utils/agentPlan';
-import { PLAN_FEATURES, getPlanFeatureKeys } from '../utils/planFeatures';
+import { PLAN_FEATURES, alignPlanFeatureLists, formatPlanStaffLimitLabel, getPlanFeatureKeys } from '../utils/planFeatures';
 import {
     type BillingCycle,
     formatPlanPrice,
@@ -41,9 +41,13 @@ const PublicPricing = () => {
         color: p.name === 'Lite' ? 'blue' : p.name === 'Growth' ? 'crm' : 'amber',
         popular: p.name === 'Growth',
         features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
-        includesStaff: getPlanFeatureKeys(p).has('teamStaff'),
+        staffLabel: formatPlanStaffLimitLabel(p),
+        includesStaff: getPlanFeatureKeys(p).has('teamStaff') && formatPlanStaffLimitLabel(p) !== 'Not included',
         includesSubAgents: getPlanFeatureKeys(p).has('subAgents'),
     }));
+    alignPlanFeatureLists(plans.map((plan) => plan.features)).forEach((features, index) => {
+        plans[index].features = features;
+    });
     const maxYearlySavings = Math.max(0, ...plans.map((p) => p.yearlySavings));
 
     const choosePlan = (planName: string) => {
@@ -77,10 +81,15 @@ const PublicPricing = () => {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-6 py-10">
-                <div className="mb-8 text-center">
-                    <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">Pricing</h1>
-                    <p className="mt-2 text-slate-500">Choose a plan, create your agency account, and pay when you join.</p>
+            <main className="max-w-7xl mx-auto px-6 pt-6 pb-10">
+                <div className="mb-6 text-center">
+                    <img src="/crm-logo.png" alt={PLATFORM_NAME} className="h-20 mx-auto object-contain" />
+                    <p className="mt-1 text-sm font-medium text-slate-400">Travel Management Platform</p>
+                    <div className="my-6 border-t border-slate-300 mx-auto max-w-3xl" />
+                    <p className="mt-3 text-lg md:text-xl font-black text-slate-900">One Platform. Every Journey.</p>
+                    <p className="mt-1 text-xs md:text-sm font-medium tracking-wide text-slate-400">
+                        CRM · Itineraries · Bookings · Payments · Operations
+                    </p>
                 </div>
 
                 <div className="mb-12 relative overflow-hidden bg-gradient-to-r from-crm-600 via-crm-700 to-indigo-800 rounded-[40px] shadow-2xl shadow-crm-500/30">
@@ -173,7 +182,7 @@ const PublicPricing = () => {
                                             <span className="text-sm font-bold text-slate-600">Team Staff</span>
                                         </div>
                                         <span className={`text-sm font-black ${plan.includesStaff ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                            {plan.includesStaff ? 'Unlimited Users' : 'Not included'}
+                                            {plan.staffLabel}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">

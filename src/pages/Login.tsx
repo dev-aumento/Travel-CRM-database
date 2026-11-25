@@ -469,9 +469,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
     if (mode === 'portal_selection') {
         return (
             <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-crm-100/20 via-slate-50 to-white">
-                <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
-                    <img src="/new-favicon.png" alt="" className="w-20 h-20 rounded-3xl shadow-2xl shadow-crm-200 mb-6 object-cover mx-auto" />
-                    <p className="text-slate-500 font-semibold text-lg">Identity Access Management</p>
+                <div className="w-full max-w-4xl px-4 mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
+                    <div className="relative">
+                        <a
+                            href="https://theavkas.com/"
+                            className="absolute left-0 top-0 z-10 inline-flex h-20 items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-900 transition-colors"
+                        >
+                            <ChevronLeft size={18} />
+                            Back to website
+                        </a>
+                        <div className="text-center">
+                            <img src="/new-favicon.png" alt="" className="w-20 h-20 rounded-3xl shadow-2xl shadow-crm-200 mb-6 object-cover mx-auto" />
+                            <p className="text-slate-500 font-semibold text-lg">Identity Access Management</p>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl px-4">

@@ -16,7 +16,7 @@ import {
     useInrUsdRate,
     useViewerPlanCurrency,
 } from '../utils/planPricing';
-import { PLAN_FEATURES, getPlanFeatureKeys, planFeatureFields } from '../utils/planFeatures';
+import { PLAN_FEATURES, alignPlanFeatureLists, formatPlanStaffLimitLabel, getPlanFeatureKeys, planFeatureFields } from '../utils/planFeatures';
 import { subscriptionPaymentFields } from '../utils/agentSubscriptionFinance';
 import { PLATFORM_NAME } from '../constants/platform';
 import PlanCardSlider from '../components/PlanCardSlider';
@@ -236,13 +236,16 @@ const Plans = () => {
         color: p.name === 'Lite' ? 'blue' : p.name === 'Growth' ? 'crm' : 'amber',
         popular: p.name === 'Growth',
         limits: {
-            staff: getPlanFeatureKeys(p).has('teamStaff') ? 'Unlimited' : 'Not included',
+            staff: formatPlanStaffLimitLabel(p),
             subAgents: getPlanFeatureKeys(p).has('subAgents') ? 'Unlimited' : 'Not included',
         },
         // Exactly the features this plan unlocks (matches what the agency gets after choosing it)
         features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
         buttonText: 'Continue with this plan'
     }));
+    alignPlanFeatureLists(plans.map((plan: any) => plan.features)).forEach((features, index) => {
+        plans[index].features = features;
+    });
     const maxYearlySavings = Math.max(0, ...plans.map((p: any) => p.yearlySavings));
 
     return (
@@ -394,8 +397,8 @@ const Plans = () => {
                                             </div>
                                             <span className="text-sm font-bold text-slate-600">Team Staff</span>
                                         </div>
-                                        <span className={`text-sm font-black ${plan.limits.staff === 'Unlimited' ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                            {plan.limits.staff === 'Unlimited' ? 'Unlimited Users' : 'Not included'}
+                                        <span className={`text-sm font-black ${plan.limits.staff === 'Not included' ? 'text-slate-400' : 'text-emerald-600'}`}>
+                                            {plan.limits.staff}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">

@@ -29,6 +29,30 @@ export const PLAN_FEATURES = [
 
 export type PlanFeatureKey = (typeof PLAN_FEATURES)[number]['key'];
 
+/** Fixed team-staff caps used when a plan still has the old unlimited value (9999). */
+export const DEFAULT_PLAN_STAFF_LIMITS: Record<string, number> = {
+    lite: 3,
+    growth: 5,
+    enterprise: 10,
+};
+
+const UNLIMITED_STAFF_SENTINEL = 9999;
+
+/** Staff seats for a plan. Master admin `staffLimit` wins; 9999 falls back to the plan default. */
+export const resolvePlanStaffLimit = (plan: any): number => {
+    const name = String(plan?.name || '').trim().toLowerCase();
+    const fallback = DEFAULT_PLAN_STAFF_LIMITS[name] ?? 5;
+    const raw = Number(plan?.staffLimit);
+    if (!Number.isFinite(raw) || raw >= UNLIMITED_STAFF_SENTINEL) return fallback;
+    return Math.max(0, Math.round(raw));
+};
+
+export const formatPlanStaffLimitLabel = (plan: any): string => {
+    const limit = resolvePlanStaffLimit(plan);
+    if (limit <= 0) return 'Not included';
+    return limit === 1 ? '1 User' : `${limit} Users`;
+};
+
 export const ALL_PLAN_FEATURE_KEYS: PlanFeatureKey[] = PLAN_FEATURES.map((f) => f.key);
 
 export const PLAN_FEATURE_LABELS = Object.fromEntries(
@@ -45,6 +69,30 @@ export const ROUTE_PLAN_FEATURES: Record<string, PlanFeatureKey[]> = {
     '/studio': ['packageStudio'],
     '/terms': ['terms'],
     '/my-team': ['teamStaff', 'subAgents'],
+};
+
+/**
+ * Keep the first plan's features in that same order on every card, so matching
+ * items sit on the same row. Features the first plan does not include are added after those.
+ */
+export const alignPlanFeatureLists = (lists: string[][]): string[][] => {
+    const base = lists[0] || [];
+    const seen = new Set(base);
+    const extras: string[] = [];
+    for (const list of lists) {
+        for (const feature of list) {
+            if (seen.has(feature)) continue;
+            seen.add(feature);
+            extras.push(feature);
+        }
+    }
+    return lists.map((list) => {
+        const included = new Set(list);
+        return [
+            ...base.filter((feature) => included.has(feature)),
+            ...extras.filter((feature) => included.has(feature)),
+        ];
+    });
 };
 
 /** Feature labels selected on a plan, in catalog order; legacy free-text features are ignored. */

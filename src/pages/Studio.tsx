@@ -42,7 +42,7 @@ import {
     isFreePlan,
     useInrUsdRate,
 } from '../utils/planPricing';
-import { PLAN_FEATURES, getPlanFeatureLabels } from '../utils/planFeatures';
+import { PLAN_FEATURES, getPlanFeatureLabels, resolvePlanStaffLimit } from '../utils/planFeatures';
 
 const TAB_SINGULAR: Record<string, string> = {
     hotels: 'Hotel',
@@ -641,7 +641,7 @@ const Studio = () => {
                                                 <Users size={12} className="mx-auto text-slate-400 mb-0.5" />
                                                 <p className="text-[8px] font-bold text-slate-400 uppercase">Staff</p>
                                                 <p className="text-xs font-bold text-slate-800">
-                                                    {Number(item.staffLimit) >= 9999 ? '∞' : item.staffLimit}
+                                                    {resolvePlanStaffLimit(item)}
                                                 </p>
                                             </div>
                                             <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
@@ -914,11 +914,11 @@ const Studio = () => {
                                                 <NumberInput
                                                     name="staffLimit"
                                                     min={0}
-                                                    defaultValue={editingItem?.staffLimit ?? 5}
+                                                    defaultValue={editingItem ? resolvePlanStaffLimit(editingItem) : 5}
                                                     required
                                                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:border-crm-500 outline-none"
                                                 />
-                                                <p className="text-[10px] text-slate-400 font-medium">Use 9999 for unlimited</p>
+                                                <p className="text-[10px] text-slate-400 font-medium">Shown on the plan card and enforced when an agency adds staff</p>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
