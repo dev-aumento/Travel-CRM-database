@@ -240,7 +240,9 @@ const Plans = () => {
             subAgents: getPlanFeatureKeys(p).has('subAgents') ? 'Unlimited' : 'Not included',
         },
         // Exactly the features this plan unlocks (matches what the agency gets after choosing it)
-        features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
+        features: PLAN_FEATURES
+        .filter((f) => getPlanFeatureKeys(p).has(f.key))
+        .map((f) => f.label) as string[],
         buttonText: 'Continue with this plan'
     }));
     alignPlanFeatureLists(plans.map((plan: any) => plan.features)).forEach((features, index) => {

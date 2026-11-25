@@ -40,7 +40,9 @@ const PublicPricing = () => {
               <Crown className="text-amber-500" size={24} />,
         color: p.name === 'Lite' ? 'blue' : p.name === 'Growth' ? 'crm' : 'amber',
         popular: p.name === 'Growth',
-        features: PLAN_FEATURES.filter((f) => getPlanFeatureKeys(p).has(f.key)).map((f) => f.label),
+        features: PLAN_FEATURES
+        .filter((f) => getPlanFeatureKeys(p).has(f.key))
+        .map((f) => f.label) as string[],
         staffLabel: formatPlanStaffLimitLabel(p),
         includesStaff: getPlanFeatureKeys(p).has('teamStaff') && formatPlanStaffLimitLabel(p) !== 'Not included',
         includesSubAgents: getPlanFeatureKeys(p).has('subAgents'),
