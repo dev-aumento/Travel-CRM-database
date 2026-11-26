@@ -229,10 +229,16 @@ export const quotationExportRows = (rows: any[], db: any) => {
         if (byCustomer !== 0) return byCustomer;
         return compareQuoteVersions(left.version, right.version);
     });
-    const byId = new Map((db?.quotations?.data || rows).map((quote: any) => [quote.id, quote]));
+    const byId = new Map<string, any>(
+        (db?.quotations?.data || rows).map(
+            (quote: any) => [String(quote.id), quote] as [string, any]
+        )
+    );
     return quotes.map((row: any) => {
         const version = formatQuoteVersionLabel(row.version);
-        const parent = row.parentId ? byId.get(row.parentId) : null;
+        const parent = row.parentId
+        ? byId.get(String(row.parentId))
+        : null;
         return [
             row.id,
             quoteCustomerName(row, db),

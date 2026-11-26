@@ -454,7 +454,7 @@ const TravelAgent = () => {
     const openAddStaffModal = () => {
         const staffCheck = canAddAgencyStaff(db, sessionAgentIdResolved);
         if (!staffCheck.allowed) {
-            showNotice(staffCheck.message);
+            showNotice(staffCheck.message ?? 'Unable to add staff member.');
             return;
         }
         setStaffForm({

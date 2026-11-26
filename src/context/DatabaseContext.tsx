@@ -894,7 +894,7 @@ export const DatabaseProvider = ({ children }: any) => {
                 if (table === 'staff') {
                     const staffCheck = canAddAgencyStaff(db, sessionAgentId);
                     if (!staffCheck.allowed) {
-                        showNotice(staffCheck.message);
+                        showNotice(staffCheck.message ?? 'Unable to add staff member.');
                         return;
                     }
                     nextRecord = normalizeStaffRecordForAgency(nextRecord, db, sessionAgentId);
