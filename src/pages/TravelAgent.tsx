@@ -15,6 +15,7 @@ import {
     type AgentSubscriptionFilter,
 } from '../utils/agentPlan';
 import AgentAvatar from '../components/AgentAvatar';
+import { showNotice } from '../components/AppNotice';
 import {
     countAgencyStaff,
     countAgencySubAgents,
@@ -453,7 +454,7 @@ const TravelAgent = () => {
     const openAddStaffModal = () => {
         const staffCheck = canAddAgencyStaff(db, sessionAgentIdResolved);
         if (!staffCheck.allowed) {
-            window.alert(staffCheck.message);
+            showNotice(staffCheck.message);
             return;
         }
         setStaffForm({
@@ -480,7 +481,7 @@ const TravelAgent = () => {
         if (editingStaffId) {
             const existingMember = (db.staff?.data || []).find((member: any) => member.id === editingStaffId);
             if (existingMember && !canManageStaffMember(existingMember)) {
-                alert(staffManageBlockedTitle);
+                showNotice(staffManageBlockedTitle);
                 return;
             }
             updateRecord('staff', editingStaffId, {
@@ -516,7 +517,7 @@ const TravelAgent = () => {
 
     const handleEditStaff = (member: any) => {
         if (!canManageStaffMember(member)) {
-            alert(staffManageBlockedTitle);
+            showNotice(staffManageBlockedTitle);
             return;
         }
         setStaffForm({
@@ -533,7 +534,7 @@ const TravelAgent = () => {
 
     const handleDeleteStaff = (member: any) => {
         if (!canManageStaffMember(member)) {
-            alert(staffManageBlockedTitle);
+            showNotice(staffManageBlockedTitle);
             return;
         }
         if (window.confirm('Are you sure you want to delete this staff member? This action cannot be undone.')) {
@@ -651,7 +652,7 @@ const TravelAgent = () => {
         e.preventDefault();
 
         if (isSubAgentSession) {
-            alert('Sub-agents cannot create or manage other agents.');
+            showNotice('Sub-agents cannot create or manage other agents.');
             return;
         }
 
@@ -684,7 +685,7 @@ const TravelAgent = () => {
         if (userRole === 'agent') {
             const trimmedPassword = agentForm.password.trim();
             if (!editingAgentId && !trimmedPassword) {
-                alert('Please set a password for staff portal login.');
+                showNotice('Please set a password for staff portal login.');
                 return;
             }
             payload.staffLoginId = normalizedEmail;
@@ -791,7 +792,7 @@ const TravelAgent = () => {
 
     const toggleStaffStatus = (member: any) => {
         if (!canManageStaffMember(member)) {
-            alert(staffManageBlockedTitle);
+            showNotice(staffManageBlockedTitle);
             return;
         }
         updateRecord('staff', member.id, {

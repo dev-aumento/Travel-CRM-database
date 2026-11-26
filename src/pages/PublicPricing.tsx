@@ -116,13 +116,13 @@ const PublicPricing = () => {
                 </div>
 
                 <div className="flex justify-center mb-10">
-                    <div className="inline-flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+                    <div className="inline-flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner max-w-full overflow-x-auto">
                         {(['monthly', 'yearly'] as const).map((cycle) => (
                             <button
                                 key={cycle}
                                 type="button"
                                 onClick={() => setBillingCycle(cycle)}
-                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${billingCycle === cycle ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                                className={`flex items-center gap-2 px-3 sm:px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${billingCycle === cycle ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                             >
                                 {cycle === 'monthly' ? 'Monthly' : 'Yearly'}
                                 {cycle === 'yearly' && maxYearlySavings > 0 && (

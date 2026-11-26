@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar, { SIDEBAR_COLLAPSED_KEY } from './Sidebar';
 import Navbar from './Navbar';
 import PlanExpiryAlertBar from './PlanExpiryAlertBar';
+import MobileBottomNav from './MobileBottomNav';
 import { type PermissionKey } from '../../utils/permissions';
 
 interface SystemLayoutProps {
@@ -82,9 +83,10 @@ const SystemLayout: React.FC<SystemLayoutProps> = ({ onLogout, userRole, userPer
             >
                 <Navbar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} isSidebarOpen={isSidebarOpen} />
                 <PlanExpiryAlertBar />
-                <main className="flex-1 flex flex-col min-h-0 min-w-0 p-4 md:p-6 overflow-hidden">
+                <main className="flex-1 flex flex-col min-h-0 min-w-0 px-4 pt-4 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-6 overflow-hidden">
                     <Outlet />
                 </main>
+                <MobileBottomNav userRole={userRole} userPermissions={userPermissions} />
             </div>
         </div>
     );

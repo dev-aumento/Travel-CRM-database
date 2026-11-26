@@ -10,6 +10,7 @@ import {
     termsContentIsEmpty,
 } from '../utils/termsRichText';
 import { resolveWorldCountryName, sortCountriesWithTrending } from '../utils/worldLocations';
+import { showNotice } from '../components/AppNotice';
 
 const EMPTY_FORM = {
     title: '',
@@ -81,7 +82,7 @@ const TermsConditions = () => {
     const handleSave = () => {
         const sanitizedContent = sanitizeTermsHtml(form.content);
         if (!form.title.trim() || !form.location.trim() || termsContentIsEmpty(sanitizedContent)) {
-            alert('Please fill title, location, and terms content.');
+            showNotice('Please fill title, location, and terms content.');
             return;
         }
 

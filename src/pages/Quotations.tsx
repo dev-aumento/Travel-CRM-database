@@ -18,6 +18,7 @@ import {
     buildLeadScheduleFromQuote,
     getQuotationsForLead,
 } from '../utils/databaseSync';
+import { showNotice } from '../components/AppNotice';
 import { PLATFORM_NAME } from '../constants/platform';
 import { draftDaysToFormItinerary, requestAiItinerary } from '../utils/aiItinerary';
 import HotelSpecialInclusionsSection, { type HotelSpecialInclusion } from '../components/HotelSpecialInclusionsSection';
@@ -936,7 +937,7 @@ const Quotations = () => {
 
     const validateCustomerBasics = (): boolean => {
         if (!formCustomer.trim()) {
-            alert('Please enter the client name.');
+            showNotice('Please enter the client name.');
             setBuilderStep('customer');
             return false;
         }
@@ -948,12 +949,12 @@ const Quotations = () => {
         }
         setPhoneError('');
         if (!formDepartureDate) {
-            alert('Please set the departure date.');
+            showNotice('Please set the departure date.');
             setBuilderStep('customer');
             return false;
         }
         if (!builderCountry?.trim()) {
-            alert('Please select a destination country.');
+            showNotice('Please select a destination country.');
             setBuilderStep('customer');
             return false;
         }
@@ -962,17 +963,17 @@ const Quotations = () => {
 
     const navigateToBuilderStep = (targetId: BuilderStepId) => {
         if (['itinerary', 'additional', 'review'].includes(targetId) && !hotelSelectionConfirmed) {
-            alert('Please confirm hotel selection on the Hotel Selection step first.');
+            showNotice('Please confirm hotel selection on the Hotel Selection step first.');
             return;
         }
         const needsCustomer = ['hotel', 'itinerary', 'additional', 'review'].includes(targetId);
         if (needsCustomer && !formCustomer.trim()) {
-            alert('Complete Customer Information first.');
+            showNotice('Complete Customer Information first.');
             setBuilderStep('customer');
             return;
         }
         if (needsCustomer && !formDepartureDate) {
-            alert('Set departure date in Customer Information first.');
+            showNotice('Set departure date in Customer Information first.');
             setBuilderStep('customer');
             return;
         }
@@ -998,7 +999,7 @@ const Quotations = () => {
         }
         if (builderStep === 'hotel') {
             if (!hotelSelectionConfirmed) {
-                alert('Click "Confirm Hotel Selection" before continuing.');
+                showNotice('Click "Confirm Hotel Selection" before continuing.');
                 return;
             }
             navigateToBuilderStep('itinerary');
@@ -1131,7 +1132,7 @@ const Quotations = () => {
             if (!formCustomer.trim() || !formPhone.trim() || !formDepartureDate) return null;
         }
         if (!effectivePresetId) {
-            if (!options?.silent) alert('Please select a destination package or preset.');
+            if (!options?.silent) showNotice('Please select a destination package or preset.');
             return null;
         }
 
@@ -1619,7 +1620,7 @@ const Quotations = () => {
     const saveChanges = () => {
         if (editingQuote) {
             updateRecord('quotations', editingQuote.id, editingQuote);
-            alert('Quotation updated successfully!');
+            showNotice('Quotation updated successfully!');
         }
     };
 
@@ -2881,7 +2882,7 @@ const Quotations = () => {
         const leads = db?.leads?.data || [];
         const email = resolveCustomerEmail(quoteToShare, leads);
         if (!email) {
-            alert(
+            showNotice(
                 'No email address found for this customer. Please add an email on the lead record when the lead is created.'
             );
             return;
@@ -3130,7 +3131,7 @@ const Quotations = () => {
         setSelectedQuoteId(newQuoteId);
         setEditingQuoteId(null);
         setIsCreating(false);
-        alert(`Quotation saved as v${newVersion}. The original v${normalizeQuoteVersion(parentQuote.version)} is unchanged.`);
+        showNotice(`Quotation saved as v${newVersion}. The original v${normalizeQuoteVersion(parentQuote.version)} is unchanged.`);
     };
 
     const handleManualFinalize = () => {
@@ -3144,7 +3145,7 @@ const Quotations = () => {
         const draft = buildCurrentQuoteOption();
         if (!draft) return;
         if (livePrice.total <= 0) {
-            alert('The quote total is 0. Please complete the hotel and itinerary pricing before saving.');
+            showNotice('The quote total is 0. Please complete the hotel and itinerary pricing before saving.');
             return;
         }
 
@@ -3698,7 +3699,7 @@ const Quotations = () => {
             addRecord,
             getNextId
         );
-        alert('Quote confirmed and linked to the lead.');
+        showNotice('Quote confirmed and linked to the lead.');
     };
 
     return (

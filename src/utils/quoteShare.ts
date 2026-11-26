@@ -8,6 +8,7 @@ import {
     hasAgencyBankDetails,
     type AgencyBankDetails,
 } from './agencyBankDetails';
+import { showNotice } from '../components/AppNotice';
 
 const getDurationDays = (duration?: string) => {
     if (!duration) return 0;
@@ -202,7 +203,7 @@ export {
 export const openWhatsAppShare = (phone: string, message: string) => {
     const digits = phone.replace(/\D/g, '');
     if (!digits) {
-        alert('No phone number on this quote. Add a phone number on the lead or quotation.');
+        showNotice('No phone number on this quote. Add a phone number on the lead or quotation.');
         return;
     }
     window.open(`https://wa.me/${digits}?text=${encodeURIComponent(message)}`, '_blank');

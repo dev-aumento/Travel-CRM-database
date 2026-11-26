@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PLATFORM_NAME } from '../constants/platform';
-import { User, Mail, Lock, LogIn, ArrowRight, Key, Shield, X, AlertCircle, Globe, Settings, Users, ChevronRight, LayoutDashboard, UserPlus, Briefcase, ChevronLeft, Zap } from 'lucide-react';
+import { User, Mail, Lock, LogIn, ArrowRight, Key, Shield, AlertCircle, Globe, Settings, Users, ChevronRight, LayoutDashboard, UserPlus, Briefcase, ChevronLeft, Zap } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
 import {
     agentLoginEmail,
@@ -469,11 +469,11 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
     if (mode === 'portal_selection') {
         return (
             <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-crm-100/20 via-slate-50 to-white">
-                <div className="w-full max-w-4xl px-4 mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
+                <div className="w-full max-w-4xl px-4 mb-8 sm:mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
                     <div className="relative">
                         <a
                             href="https://theavkas.com/"
-                            className="absolute left-0 top-0 z-10 inline-flex h-20 items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-900 transition-colors"
+                            className="mb-4 inline-flex items-center gap-1.5 text-sm font-bold text-slate-500 hover:text-slate-900 transition-colors sm:absolute sm:left-0 sm:top-0 sm:z-10 sm:mb-0 sm:h-20"
                         >
                             <ChevronLeft size={18} />
                             Back to website
@@ -486,7 +486,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl px-4">
-                    <button onClick={() => selectPortal('agent')} className="group relative bg-white p-10 rounded-[2.5rem] border-2 border-transparent hover:border-crm-500 shadow-xl shadow-slate-200/50 transition-all duration-500 hover:-translate-y-2 text-left overflow-hidden">
+                    <button onClick={() => selectPortal('agent')} className="group relative bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[2.5rem] border-2 border-transparent hover:border-crm-500 shadow-xl shadow-slate-200/50 transition-all duration-500 sm:hover:-translate-y-2 text-left overflow-hidden">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-crm-50 rounded-full -mr-16 -mt-16 group-hover:bg-crm-100 transition-colors" />
                         <div className="relative z-10">
                             <div className="w-16 h-16 bg-crm-600 text-white rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-500">
@@ -498,7 +498,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                         </div>
                     </button>
 
-                    <button onClick={() => { setPortalType('agent'); setMode('staff_login'); }} className="group relative bg-white p-10 rounded-[2.5rem] border-2 border-transparent hover:border-slate-900 shadow-xl shadow-slate-200/50 transition-all duration-500 hover:-translate-y-2 text-left overflow-hidden">
+                    <button onClick={() => { setPortalType('agent'); setMode('staff_login'); }} className="group relative bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[2.5rem] border-2 border-transparent hover:border-slate-900 shadow-xl shadow-slate-200/50 transition-all duration-500 sm:hover:-translate-y-2 text-left overflow-hidden">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 rounded-full -mr-16 -mt-16 group-hover:bg-slate-100 transition-colors" />
                         <div className="relative z-10">
                             <div className="w-16 h-16 bg-slate-800 text-white rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-500">
@@ -557,15 +557,29 @@ const Login: React.FC<LoginProps> = ({ onLogin, initialPortal = null, initialMod
                 </button>
 
                 {devOtp && (
-                    <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-right-full duration-500 max-w-sm">
-                        <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-2xl border border-white/10 backdrop-blur-md">
-                            <div className="flex items-start gap-4">
-                                <div className="w-10 h-10 rounded-full bg-crm-500 flex items-center justify-center shrink-0"><Mail className="text-white" size={20} /></div>
-                                <div>
-                                    <h4 className="font-bold text-sm">Auth Notification (Dev)</h4>
-                                    <div className="mt-3 bg-white/10 p-3 rounded-lg"><p className="text-2xl font-black tracking-[0.2em] text-crm-400">{devOtp}</p></div>
-                                </div>
-                                <button onClick={() => setDevOtp(null)}><X size={16} /></button>
+                    <div
+                        className="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-900/50 p-4"
+                        onClick={() => setDevOtp(null)}
+                    >
+                        <div
+                            role="dialog"
+                            aria-modal="true"
+                            className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8"
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <h2 className="text-xl font-bold text-slate-900">Verification code</h2>
+                            <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+                                Use this code to continue.
+                            </p>
+                            <p className="mt-4 text-3xl font-black tracking-[0.2em] text-slate-900">{devOtp}</p>
+                            <div className="mt-6 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setDevOtp(null)}
+                                    className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800"
+                                >
+                                    Ok
+                                </button>
                             </div>
                         </div>
                     </div>

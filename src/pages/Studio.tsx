@@ -5,6 +5,7 @@ import CountryFlag from '../components/CountryFlag';
 import DropdownChevron from '../components/DropdownChevron';
 import CountryGroupedOptions from '../components/CountryGroupedOptions';
 import { resolveWorldCountryName, sortCountriesWithTrending } from '../utils/worldLocations';
+import { showNotice } from '../components/AppNotice';
 import {
     Hotel,
     Palmtree,
@@ -318,7 +319,7 @@ const Studio = () => {
             }
         } else if (activeTab === 'plans') {
             if (planFeaturesDraft.length === 0) {
-                alert('Select at least one feature for this plan.');
+                showNotice('Select at least one feature for this plan.');
                 return;
             }
             const priceInr = Math.max(0, Math.round(Number(data.priceInr) || 0));
@@ -348,7 +349,7 @@ const Studio = () => {
 
     const deleteItem = (item: any) => {
         if (item.isSystem) {
-            alert('Built-in master presets cannot be deleted. Duplicate it as a custom preset to customize.');
+            showNotice('Built-in master presets cannot be deleted. Duplicate it as a custom preset to customize.');
             return;
         }
         if (activeTab === 'plans') {
@@ -436,7 +437,7 @@ const Studio = () => {
                         </div>
                     ) : (
                         <>
-                            <div className="flex flex-nowrap items-center gap-3 w-full">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full">
                                 <div className="relative shrink-0 min-w-0">
                                     <button
                                         type="button"
@@ -490,7 +491,7 @@ const Studio = () => {
                                 </div>
                                 <button
                                     onClick={() => { setEditingItem(null); setShowModal(true); }}
-                                    className="ml-auto px-4 sm:px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-slate-800 transform active:scale-95 transition-all shadow-lg shadow-slate-900/20 whitespace-nowrap shrink-0"
+                                    className="w-full sm:w-auto sm:ml-auto px-4 sm:px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:bg-slate-800 transform active:scale-95 transition-all shadow-lg shadow-slate-900/20 whitespace-nowrap shrink-0"
                                 >
                                     <Plus size={18} className="shrink-0" /> Add New {TAB_SINGULAR[activeTab]}
                                 </button>
@@ -527,7 +528,7 @@ const Studio = () => {
                         )}
                         {filteredData.map((item: any) => (
                             <div key={item.id} className="group relative bg-white border border-slate-200 rounded-2xl p-4 md:p-5 hover:shadow-xl hover:shadow-crm-500/10 hover:border-crm-200 transition-all duration-300 min-w-0">
-                                <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                <div className="absolute top-4 right-4 flex gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
                                     <button onClick={() => { setEditingItem(item); setShowModal(true); }} className="p-2 bg-white text-slate-500 hover:text-crm-600 rounded-xl border border-slate-100 shadow-md transform hover:scale-110 transition-all">
                                         <Edit2 size={16} />
                                     </button>

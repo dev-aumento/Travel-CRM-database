@@ -21,26 +21,42 @@ import { canAccessRoute, getStoredPermissions } from '../utils/permissions';
 import { useCurrency } from '../hooks/useCurrency';
 import AgentAvatar from '../components/AgentAvatar';
 
-const StatCard = ({ title, value, change, icon: Icon, trend, showChange = true }: any) => (
-    <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-        <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-crm-50 text-crm-600 rounded-xl">
-                <Icon size={24} strokeWidth={2} />
-            </div>
-            {showChange && change && (
-                <div className={`flex items-center gap-1 text-sm font-medium px-2 py-1 rounded-full ${trend === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
-                    }`}>
-                    <ArrowUpRight size={16} className={trend === 'down' ? 'rotate-90' : ''} />
-                    {change}
-                </div>
-            )}
-        </div>
-        <div>
-            <h3 className="text-slate-500 text-sm font-medium mb-1">{title}</h3>
-            <h2 className="text-3xl font-bold text-slate-800 tracking-tight">{value}</h2>
-        </div>
+const StatChange = ({ change, trend }: { change: string; trend?: string }) => (
+    <div className={`flex items-center gap-1 text-sm font-medium px-2 py-1 rounded-full shrink-0 ${trend === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+        <ArrowUpRight size={16} className={trend === 'down' ? 'rotate-90' : ''} />
+        {change}
     </div>
 );
+
+const StatCard = ({ title, value, change, icon: Icon, trend, showChange = true }: any) => {
+    const changeBadge = showChange && change ? <StatChange change={change} trend={trend} /> : null;
+    return (
+        <div className="bg-white rounded-3xl sm:rounded-[32px] p-4 sm:p-6 border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 sm:hidden">
+                <div className="p-2.5 bg-crm-50 text-crm-600 rounded-xl shrink-0">
+                    <Icon size={22} strokeWidth={2} />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <h2 className="text-2xl font-bold text-slate-800 tracking-tight leading-none">{value}</h2>
+                    <h3 className="text-slate-500 text-sm font-medium mt-1 truncate">{title}</h3>
+                </div>
+                {changeBadge}
+            </div>
+            <div className="hidden sm:block">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-crm-50 text-crm-600 rounded-xl">
+                        <Icon size={24} strokeWidth={2} />
+                    </div>
+                    {changeBadge}
+                </div>
+                <div>
+                    <h3 className="text-slate-500 text-sm font-medium mb-1">{title}</h3>
+                    <h2 className="text-3xl font-bold text-slate-800 tracking-tight">{value}</h2>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const getInitials = (name: string) =>
     String(name || '?')
@@ -279,7 +295,7 @@ const Dashboard = () => {
 
     return (
         <div className="h-full flex flex-col gap-6 overflow-hidden">
-            <div className="flex items-center justify-between shrink-0">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">
                         {isAdmin ? 'Platform Overview' : 'Agency Overview'}
@@ -301,7 +317,7 @@ const Dashboard = () => {
                 )}
             </div>
             {showTrialBanner && (
-                <div className="bg-gradient-to-r from-amber-500 to-orange-600 rounded-[24px] p-4 text-white flex items-center justify-between shadow-lg shadow-amber-500/20">
+                <div className="bg-gradient-to-r from-amber-500 to-orange-600 rounded-[24px] p-4 text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-lg shadow-amber-500/20">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-white/20 rounded-xl">
                             <Zap size={20} className="fill-current" />
@@ -317,7 +333,7 @@ const Dashboard = () => {
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto space-y-6 custom-scrollbar pr-2">
+            <div className="flex-1 overflow-y-auto space-y-6 custom-scrollbar sm:pr-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                     {isAdmin ? (
                         <>
@@ -358,23 +374,23 @@ const Dashboard = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 bg-white rounded-[32px] border border-slate-100 shadow-sm p-8">
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                    <div className="lg:col-span-2 bg-white border border-slate-100 shadow-sm rounded-[32px] px-4 py-4 sm:p-8">
+                        <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6 min-w-0">
+                            <h2 className="text-lg sm:text-xl font-black text-slate-900">
                                 {isAdmin ? 'Recent Subscriptions' : 'Recent Quotations'}
                             </h2>
                             <button
                                 onClick={() =>
                                     navigate(isAdmin ? '/finance?view=subscriptions' : '/quotations')
                                 }
-                                className="text-sm font-bold text-crm-600 hover:text-crm-700"
+                                className="text-sm font-bold text-crm-600 hover:text-crm-700 shrink-0"
                             >
                                 {isAdmin ? 'View All Subscriptions' : 'View All Records'}
                             </button>
                         </div>
 
                         {isAdmin ? (
-                            <div className="space-y-4">
+                            <div className="space-y-2 sm:space-y-4">
                                 {recentSubscriptions.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                                         <Crown size={32} className="text-slate-200 mb-3" />
@@ -385,9 +401,9 @@ const Dashboard = () => {
                                         <div
                                             key={row.id}
                                             onClick={() => navigate('/finance?view=subscriptions')}
-                                            className="flex items-center justify-between p-5 rounded-3xl border border-slate-100 hover:border-crm-100 hover:bg-crm-50/50 dark:hover:border-slate-600 dark:hover:bg-slate-700/60 transition-colors cursor-pointer group"
+                                            className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-100 hover:border-crm-100 hover:bg-crm-50/50 dark:hover:border-slate-600 dark:hover:bg-slate-700/60 transition-colors cursor-pointer group"
                                         >
-                                            <div className="flex items-center gap-5 min-w-0">
+                                            <div className="flex items-center gap-3 sm:gap-5 min-w-0">
                                                 <AgentAvatar
                                                     agent={row.agent}
                                                     className="w-12 h-12"
@@ -396,21 +412,21 @@ const Dashboard = () => {
                                                     textClassName="text-sm"
                                                 />
                                                 <div className="min-w-0">
-                                                    <h4 className="font-bold text-slate-900 truncate">
+                                                    <h4 className="font-bold text-slate-900 break-words">
                                                         {row.agent?.name || 'Agent'}
                                                     </h4>
-                                                    <p className="text-xs text-slate-400 dark:text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300 font-medium flex items-center gap-1.5 mt-1 truncate">
-                                                        <Crown size={14} className="text-slate-300 dark:text-slate-500 group-hover:text-crm-500 dark:group-hover:text-crm-400 transition-colors shrink-0" />
-                                                        {row.planName} Plan · Purchased {row.purchasedAt}
+                                                    <p className="text-xs text-slate-400 dark:text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300 font-medium flex items-start gap-1.5 mt-1">
+                                                        <Crown size={14} className="text-slate-300 dark:text-slate-500 group-hover:text-crm-500 dark:group-hover:text-crm-400 transition-colors shrink-0 mt-0.5" />
+                                                        <span className="break-words">{row.planName} Plan · Purchased {row.purchasedAt}</span>
                                                     </p>
                                                     {row.agent?.businessName && (
-                                                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{row.agent.businessName}</p>
+                                                        <p className="text-[10px] text-slate-400 mt-0.5 break-words">{row.agent.businessName}</p>
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="text-right shrink-0 ml-4">
-                                                <div className="font-black text-slate-900 text-lg">{row.payment.totalFormatted}</div>
-                                                <div className={`text-[10px] font-black px-3 py-1 rounded-full mt-1.5 inline-block uppercase tracking-wider ${subscriptionStatusClass(row.payment.status)}`}>
+                                            <div className="flex flex-wrap items-center justify-between gap-2 pl-[60px] sm:block sm:text-right sm:shrink-0 sm:ml-4 sm:pl-0">
+                                                <div className="font-black text-slate-900 text-base sm:text-lg whitespace-nowrap">{row.payment.totalFormatted}</div>
+                                                <div className={`text-[10px] font-black px-3 py-1 rounded-full sm:mt-1.5 inline-block uppercase tracking-wider whitespace-nowrap ${subscriptionStatusClass(row.payment.status)}`}>
                                                     {row.payment.status === 'trial' ? 'Trial Active' : row.payment.status === 'paid' ? 'Paid' : 'Unpaid'}
                                                 </div>
                                             </div>
@@ -419,7 +435,7 @@ const Dashboard = () => {
                                 )}
                             </div>
                         ) : (
-                            <div className="space-y-4">
+                            <div className="space-y-2 sm:space-y-4">
                                 {recentQuotations.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                                         <FileText size={32} className="text-slate-200 mb-3" />
@@ -436,27 +452,29 @@ const Dashboard = () => {
                                         <div
                                             key={quote.id}
                                             onClick={() => navigate('/quotations')}
-                                            className="flex items-center justify-between p-5 rounded-3xl border border-slate-100 hover:border-crm-100 hover:bg-crm-50/50 dark:hover:border-slate-600 dark:hover:bg-slate-700/60 transition-colors cursor-pointer group"
+                                            className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-100 hover:border-crm-100 hover:bg-crm-50/50 dark:hover:border-slate-600 dark:hover:bg-slate-700/60 transition-colors cursor-pointer group"
                                         >
-                                            <div className="flex items-center gap-5 min-w-0">
+                                            <div className="flex items-center gap-3 sm:gap-5 min-w-0">
                                                 <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center font-black text-sm shrink-0">
                                                     {getInitials(quote.customer)}
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <h4 className="font-bold text-slate-900 truncate">{quote.customer}</h4>
-                                                    <p className="text-xs text-slate-400 dark:text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300 font-medium flex items-center gap-1.5 mt-1 truncate">
-                                                        <MapPin size={14} className="text-slate-300 dark:text-slate-500 group-hover:text-crm-500 dark:group-hover:text-crm-400 transition-colors shrink-0" />
-                                                        {quote.destination}
-                                                        {quote.duration ? ` · ${quote.duration.split('/')[0]?.trim()}` : ''}
+                                                    <h4 className="font-bold text-slate-900 break-words">{quote.customer}</h4>
+                                                    <p className="text-xs text-slate-400 dark:text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300 font-medium flex items-start gap-1.5 mt-1">
+                                                        <MapPin size={14} className="text-slate-300 dark:text-slate-500 group-hover:text-crm-500 dark:group-hover:text-crm-400 transition-colors shrink-0 mt-0.5" />
+                                                        <span className="break-words">
+                                                            {quote.destination}
+                                                            {quote.duration ? ` · ${quote.duration.split('/')[0]?.trim()}` : ''}
+                                                        </span>
                                                     </p>
                                                     {quote.version && (
                                                         <p className="text-[10px] text-slate-400 dark:text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300 mt-0.5">Version {quote.version}</p>
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="text-right shrink-0 ml-4">
-                                                <div className="font-black text-slate-900 text-lg">{formatQuoteAmount(quote)}</div>
-                                                <div className={`text-[10px] font-black px-3 py-1 rounded-full mt-1.5 inline-block uppercase tracking-wider ${quoteStatusClass(quote.status)}`}>
+                                            <div className="flex flex-wrap items-center justify-between gap-2 pl-[60px] sm:block sm:text-right sm:shrink-0 sm:ml-4 sm:pl-0">
+                                                <div className="font-black text-slate-900 text-base sm:text-lg whitespace-nowrap">{formatQuoteAmount(quote)}</div>
+                                                <div className={`text-[10px] font-black px-3 py-1 rounded-full sm:mt-1.5 inline-block uppercase tracking-wider whitespace-nowrap ${quoteStatusClass(quote.status)}`}>
                                                     {formatQuoteStatusLabel(quote.status)}
                                                 </div>
                                             </div>
@@ -467,7 +485,7 @@ const Dashboard = () => {
                         )}
                     </div>
 
-                    <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-8">
+                    <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-4 sm:p-8">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-black text-slate-900 tracking-tight">
                                 {isAdmin ? 'Plan Distribution' : 'Top Regions'}

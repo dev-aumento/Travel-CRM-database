@@ -9,6 +9,7 @@ import CancelTripModal, { type CancelTripTarget } from '../components/CancelTrip
 import VisibleScrollArea from '../components/VisibleScrollArea';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDatabase } from '../context/DatabaseContext';
+import { showNotice } from '../components/AppNotice';
 import { usePlanFeatures } from '../utils/planFeatures';
 import { packagePresets, calculateQuote, parseTravelers, guessPresetFromDestination, parseDurationNights } from '../utils/pricing';
 import { sourceCountries, internationalAirports } from '../utils/aviationData';
@@ -880,12 +881,12 @@ const LeadCard = ({ lead, onDragStart, onEdit, onDelete, onCancel, isHighlighted
                 getNextId
             );
             setSelectedQuote(null);
-            alert("Execution Successful! Booking synchronized with confirmed package.");
+            showNotice("Execution Successful! Booking synchronized with confirmed package.");
         }
     };
 
     const handleCustomise = (quote: any, feedback: string) => {
-        if (!feedback.trim()) return alert("Please specify the adjustments needed in your proposal.");
+        if (!feedback.trim()) return showNotice("Please specify the adjustments needed in your proposal.");
 
         updateRecord('quotations', quote.id, {
             customizationRequest: feedback,
@@ -894,7 +895,7 @@ const LeadCard = ({ lead, onDragStart, onEdit, onDelete, onCancel, isHighlighted
         updateRecord('leads', lead.id, { status: 'negotiation' });
 
         setSelectedQuote(null);
-        alert("Strategic Feedback Dispatched! Our team will refine Option " + quote.version + " based on your requests.");
+        showNotice("Strategic Feedback Dispatched! Our team will refine Option " + quote.version + " based on your requests.");
     };
 
     return (
@@ -1029,7 +1030,7 @@ const LeadCard = ({ lead, onDragStart, onEdit, onDelete, onCancel, isHighlighted
                     />
                 )}
 
-                <div className="flex gap-2 pt-3 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-2 pt-3 mt-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                     <button
                         onClick={(e) => { e.stopPropagation(); onEdit(lead); }}
                         className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-white text-slate-500 hover:text-crm-600 hover:bg-crm-50 rounded-lg text-[10px] font-bold transition-all border border-slate-200"
@@ -1696,7 +1697,7 @@ const AgentLeadsView = () => {
             payload,
         });
         setCancelTarget(null);
-        alert('Trip marked as canceled.');
+        showNotice('Trip marked as canceled.');
     };
 
     const handleSaveLead = (e: React.FormEvent<HTMLFormElement>) => {
@@ -1900,20 +1901,20 @@ const AgentLeadsView = () => {
     const requestQuotationForConfirmation = (lead: any) => {
         const leadQuotes = getQuotationsForLead(db, lead);
         if (leadQuotes.length === 0) {
-            window.alert(
+            showNotice(
                 'A quotation is required before confirming this lead. You will be redirected to create one.'
             );
             navigate(`/quotations?leadId=${encodeURIComponent(lead.id)}&createQuote=true`);
             return;
         }
-        window.alert(
+        showNotice(
             'Select a package quotation and confirm it before moving this lead to Confirmed. Opening quotations…'
         );
         navigate(`/quotations?leadId=${encodeURIComponent(lead.id)}&selectQuote=true`);
     };
 
     const requestQuotationBeforeLeavingNew = (lead: any) => {
-        window.alert(
+        showNotice(
             'Create a quotation before moving this lead out of New Leads. You will be redirected to create one.'
         );
         navigate(`/quotations?leadId=${encodeURIComponent(lead.id)}&createQuote=true`);
@@ -1951,7 +1952,7 @@ const AgentLeadsView = () => {
 
         // Follow-up notes are a plan feature; plans without it can move leads to Contacted freely
         if (statusId === 'contacted' && canFollowUp && !hasLeadHighlightOrFollowUp(lead)) {
-            window.alert(
+            showNotice(
                 'Add a lead highlight or follow-up note before moving this lead to Contacted.'
             );
             return;

@@ -8,6 +8,7 @@ import VisibleScrollArea from '../components/VisibleScrollArea';
 import { resolveBookingVoucherContext } from '../utils/hotelVoucherShare';
 import CancelTripModal, { type CancelTripTarget } from '../components/CancelTripModal';
 import { useDatabase } from '../context/DatabaseContext';
+import { showNotice } from '../components/AppNotice';
 import {
     getUnifiedBudgetForBooking,
     getBookingPaymentDetails,
@@ -159,7 +160,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                         {voucherContext && canEdit && onSendHotelVoucher && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onSendHotelVoucher(bk); }}
-                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-700 bg-white p-1.5 rounded-md border border-emerald-200 shadow-sm text-emerald-600"
+                                className="shrink-0 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:text-emerald-700 bg-white p-1.5 rounded-md border border-emerald-200 shadow-sm text-emerald-600"
                                 title="Send hotel voucher"
                             >
                                 <Hotel size={15} />
@@ -167,7 +168,7 @@ const BookingRow = ({ bk, leadIndex, db, updateRecord, onViewInvoice, onSendHote
                         )}
                         <button
                             onClick={(e) => { e.stopPropagation(); onViewInvoice(bk); }}
-                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-crm-600 bg-white p-1.5 rounded-md border border-slate-200 shadow-sm text-slate-500"
+                            className="shrink-0 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:text-crm-600 bg-white p-1.5 rounded-md border border-slate-200 shadow-sm text-slate-500"
                             title="View Invoice"
                         >
                             <Eye size={15} />
@@ -451,7 +452,7 @@ const Bookings = () => {
         if (!canEditBooking(booking, linkedLead)) return;
         const ctx = resolveBookingVoucherContext(booking, db);
         if (!ctx) {
-            alert('No hotel stays found for this booking. Confirm a quote with hotels first.');
+            showNotice('No hotel stays found for this booking. Confirm a quote with hotels first.');
             return;
         }
         setVoucherBooking(booking);
@@ -490,7 +491,7 @@ const Bookings = () => {
             setSelectedBooking(null);
         }
         setCancelTarget(null);
-        alert('Trip marked as canceled.');
+        showNotice('Trip marked as canceled.');
     };
 
     const handleDownloadReport = () => {

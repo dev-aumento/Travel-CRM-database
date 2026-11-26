@@ -22,6 +22,7 @@ import { PLATFORM_NAME } from '../constants/platform';
 import PlanCardSlider from '../components/PlanCardSlider';
 import PlanFeatureList from '../components/PlanFeatureList';
 import { createRazorpayCheckout, loadRazorpayCheckout } from '../utils/razorpayCheckout';
+import { showNotice } from '../components/AppNotice';
 
 const Plans = () => {
     const { db, updateRecord } = useDatabase();
@@ -38,7 +39,7 @@ const Plans = () => {
 
     const [billingCycle, setBillingCycle] = React.useState<BillingCycle>('monthly');
     const [upgradingTo, setUpgradingTo] = React.useState<string | null>(null);
-    const [showSuccess, setShowSuccess] = React.useState(false);
+    const [showCancelConfirm, setShowCancelConfirm] = React.useState(false);
     const paymentSettled = React.useRef(false);
     const syncSubAgentPlans = (planName: string, planFields: Record<string, unknown> = {}) => {
         if (!currentAgent?.id) return;
@@ -81,18 +82,17 @@ const Plans = () => {
             ...planFeatureFields(selected),
             ...planFields,
         });
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 3000);
+        showNotice('Your plan is active.');
     };
 
     const handleUpgrade = async (planName: string) => {
         if (userRole !== 'agent') {
-            alert('Only Agency Owners can manage subscriptions.');
+            showNotice('Only Agency Owners can manage subscriptions.');
             return;
         }
 
         if (!currentAgent) {
-            alert('Agency record not found. Please try logging in again.');
+            showNotice('Agency record not found. Please try logging in again.');
             return;
         }
 
@@ -177,7 +177,7 @@ const Plans = () => {
                         });
                     } catch (error) {
                         console.error('Payment verification failed:', error);
-                        alert(error instanceof Error ? error.message : 'Payment could not be verified.');
+                        showNotice(error instanceof Error ? error.message : 'Payment could not be verified.');
                     } finally {
                         setUpgradingTo(null);
                     }
@@ -187,14 +187,20 @@ const Plans = () => {
             checkout.on('payment.failed', (failed) => {
                 paymentSettled.current = true;
                 setUpgradingTo(null);
-                alert(failed?.error?.description || 'Payment failed. Please try again.');
+                showNotice(failed?.error?.description || 'Payment failed. Please try again.');
             });
             checkout.open();
         } catch (error) {
             console.error('Upgrade failed:', error);
-            alert(error instanceof Error ? error.message : 'Upgrade failed. Please try again.');
+            showNotice(error instanceof Error ? error.message : 'Upgrade failed. Please try again.');
             setUpgradingTo(null);
         }
+    };
+
+    const handleConfirmCancelSubscription = () => {
+        if (!currentAgent?.id || userRole !== 'agent') return;
+        updateRecord('travelAgents', currentAgent.id, { status: 'disabled' });
+        setShowCancelConfirm(false);
     };
 
     const handleStartTrial = (planName: string) => {
@@ -213,8 +219,7 @@ const Plans = () => {
             isTrial: true,
             trialEndsAt,
         });
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 3000);
+        showNotice('Your plan is active.');
     };
     const dbPlans = sortPlansByPriceAsc(db.plans?.data || []);
     // Country comes from the viewer's IP (so a VPN location is respected), not the browser timezone
@@ -252,20 +257,6 @@ const Plans = () => {
 
     return (
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto relative">
-            {/* Premium Success Notification */}
-            {showSuccess && (
-                <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top duration-500 fill-mode-forwards">
-                    <div className="bg-slate-900 text-white px-8 py-4 rounded-[24px] shadow-2xl shadow-slate-900/40 flex items-center gap-4 border border-white/10 backdrop-blur-xl">
-                        <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                            <Check className="text-white" size={20} strokeWidth={4} />
-                        </div>
-                        <div>
-                            <p className="text-sm font-black tracking-tight">Success!</p>
-                            <p className="text-[11px] text-slate-400 font-medium">Your plan is active.</p>
-                        </div>
-                    </div>
-                </div>
-            )}
             <div className="mb-8">
                 <h1 className="text-2xl font-bold text-slate-800">Subscription Plans</h1>
                 <p className="text-slate-500">Manage your agency limits and choose the plan that scales with your team.</p>
@@ -313,13 +304,13 @@ const Plans = () => {
 
             {/* Billing cycle tabs */}
             <div className="flex justify-center mb-10">
-                <div className="inline-flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+                <div className="inline-flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner max-w-full overflow-x-auto">
                     {(['monthly', 'yearly'] as const).map((cycle) => (
                         <button
                             key={cycle}
                             type="button"
                             onClick={() => setBillingCycle(cycle)}
-                            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${billingCycle === cycle ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                            className={`flex items-center gap-2 px-3 sm:px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${billingCycle === cycle ? 'bg-white text-crm-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                         >
                             {cycle === 'monthly' ? 'Monthly' : 'Yearly'}
                             {cycle === 'yearly' && maxYearlySavings > 0 && (
@@ -456,6 +447,56 @@ const Plans = () => {
                     );
                 })}
             </PlanCardSlider>
+
+            {userRole === 'agent' && currentAgent && (
+                <div className="max-w-7xl mx-auto w-full flex justify-center pb-10">
+                    <button
+                        type="button"
+                        onClick={() => setShowCancelConfirm(true)}
+                        className="px-6 py-3 rounded-2xl border border-red-200 text-red-600 text-sm font-bold hover:bg-red-50 transition-colors"
+                    >
+                        Cancel subscription
+                    </button>
+                </div>
+            )}
+
+            {showCancelConfirm && (
+                <div
+                    className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/50 p-4"
+                    onClick={() => setShowCancelConfirm(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="cancel-subscription-title"
+                        className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <h2 id="cancel-subscription-title" className="text-xl font-bold text-slate-900">
+                            Cancel subscription
+                        </h2>
+                        <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+                            Are you sure you want to cancel the subscription? Once you cancel, your access will be removed immediately and you will not be able to use the CRM. If you want to use the CRM again, you have to contact the support team or the CRM admin.
+                        </p>
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowCancelConfirm(false)}
+                                className="px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmCancelSubscription}
+                                className="px-5 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700"
+                            >
+                                Ok
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Help Section */}
             <div className="mt-4 p-8 bg-white border border-slate-100 rounded-[32px] flex flex-col md:flex-row items-center justify-between gap-6 max-w-7xl w-full mx-auto shadow-sm">

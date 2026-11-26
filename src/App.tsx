@@ -16,6 +16,7 @@ import Finance from './pages/Finance';
 import AdminSubscriptionFinance from './pages/AdminSubscriptionFinance';
 import Plans from './pages/Plans';
 import PublicPricing from './pages/PublicPricing';
+import AppNotice from './components/AppNotice';
 import TermsConditions from './pages/TermsConditions';
 import PlanFeatureLocked from './components/PlanFeatureLocked';
 import { DatabaseProvider, useDatabase } from './context/DatabaseContext';
@@ -280,6 +281,7 @@ function App() {
         <Router>
           <AppContent />
         </Router>
+        <AppNotice />
       </DatabaseProvider>
     </ThemeProvider>
   );

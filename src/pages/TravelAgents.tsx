@@ -149,7 +149,7 @@ const TravelAgents = () => {
                 <div className="lg:col-span-8 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                     {filteredAgents.map((agent: any) => (
                         <div key={agent.id} className="group bg-white rounded-2xl border border-slate-200 p-5 hover:border-crm-300 hover:shadow-xl hover:shadow-slate-200/50 transition-all relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="absolute top-0 right-0 p-4 flex gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => handleEdit(agent)} className="p-2 text-slate-400 hover:text-crm-600 hover:bg-crm-50 rounded-lg transition-all">
                                     <Edit2 size={16} />
                                 </button>

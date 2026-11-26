@@ -243,7 +243,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
                         />
                     </div>
                     {isSearchFocused && searchQuery.trim() && (
-                        <div className="absolute top-full left-0 mt-2 w-72 md:w-96 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300 z-50">
+                        <div className="absolute top-full left-0 mt-2 w-[min(24rem,calc(100vw-2rem))] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300 z-50">
                             <div className="p-2 max-h-[60vh] overflow-y-auto">
                                 {searchResults.length > 0 ? (
                                     searchResults.map((result: any) => (
@@ -301,7 +301,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
                 {trialInfo && trialInfo.active && (
                     <div 
                         onClick={() => navigate('/plans')}
-                        className="flex shrink-0 items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-amber-100 transition-all shadow-sm whitespace-nowrap"
+                        className="hidden sm:flex shrink-0 items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-amber-100 transition-all shadow-sm whitespace-nowrap"
                     >
                         <Zap size={14} className="fill-current" />
                         Trial: {trialInfo.daysLeft} Days Left
@@ -311,7 +311,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
                 {planExpiryAlert && (
                     <div
                         onClick={() => navigate(isMainAgencyOwnerSession(userRole, currentAgentId, db) ? '/plans' : '/')}
-                        className="flex shrink-0 items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-amber-100 transition-all shadow-sm whitespace-nowrap"
+                        className="hidden sm:flex shrink-0 items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-amber-100 transition-all shadow-sm whitespace-nowrap"
                     >
                         <AlertTriangle size={14} />
                         Plan: {planExpiryAlert.daysLeft} Days Left
@@ -350,7 +350,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
                         )}
                     </button>
                     {showNotifs && (
-                        <div className="absolute top-full right-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="absolute top-full right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
                                 <h3 className="font-bold text-slate-800 dark:text-slate-100">Notifications</h3>
                                 {unreadCount > 0 && (
@@ -377,7 +377,7 @@ const Navbar = ({ onToggleSidebar, isSidebarOpen }: { onToggleSidebar: () => voi
                                             {!n.read && (
                                                 <button 
                                                     onClick={(e) => handleMarkAsRead(e, n)}
-                                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full text-slate-400 hover:text-crm-600"
+                                                    className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full text-slate-400 hover:text-crm-600 shrink-0"
                                                     title="Mark as read"
                                                 >
                                                     <CheckCircle2 size={14} />

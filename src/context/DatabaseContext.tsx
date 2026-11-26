@@ -13,6 +13,7 @@ import {
     normalizeSubAgentRecordForAgency,
     inferLeadPipelineStatus,
 } from '../utils/databaseSync';
+import { showNotice } from '../components/AppNotice';
 import { ensureTrackingId } from '../utils/trackingId';
 import { inferQuoteCreatedAt, normalizeQuoteVersion } from '../utils/quoteActivities';
 import { migrateTravelAgentRecords } from '../utils/agentPlan';
@@ -893,7 +894,7 @@ export const DatabaseProvider = ({ children }: any) => {
                 if (table === 'staff') {
                     const staffCheck = canAddAgencyStaff(db, sessionAgentId);
                     if (!staffCheck.allowed) {
-                        window.alert(staffCheck.message);
+                        showNotice(staffCheck.message);
                         return;
                     }
                     nextRecord = normalizeStaffRecordForAgency(nextRecord, db, sessionAgentId);

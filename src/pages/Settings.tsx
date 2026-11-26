@@ -12,13 +12,14 @@ import DropdownChevron from '../components/DropdownChevron';
 import PlanFeatureLocked from '../components/PlanFeatureLocked';
 import { usePlanFeatures } from '../utils/planFeatures';
 import { DEFAULT_TIMEZONE, TIMEZONE_OPTIONS } from '../utils/timezoneData';
+import { showNotice } from '../components/AppNotice';
+import DataTransferPanel from '../components/DataTransferPanel';
 
 const TABS = [
     { id: 'general', label: 'General' },
-    { id: 'notifications', label: 'Notifications' },
-    { id: 'security', label: 'Security' },
     { id: 'integrations', label: 'Integrations' },
     { id: 'banking', label: 'Banking' },
+    { id: 'transfer', label: 'Import & Export' },
     { id: 'system', label: 'System Management' },
 ] as const;
 
@@ -138,7 +139,7 @@ const Settings = () => {
 
         const inrPerUsd = formState.planInrPerUsd.trim();
         if (inrPerUsd && !(Number(inrPerUsd) > 0)) {
-            alert('USD conversion rate must be a number greater than 0, or left blank to use the live rate.');
+            showNotice('USD conversion rate must be a number greater than 0, or left blank to use the live rate.');
             return;
         }
 
@@ -160,7 +161,7 @@ const Settings = () => {
                 ...formState,
                 email: settingsOwnerEmail,
             });
-            alert('Settings updated successfully!');
+            showNotice('Settings updated successfully!');
             return;
         }
 
@@ -169,7 +170,7 @@ const Settings = () => {
             email: settingsOwnerEmail,
             ...formState,
         });
-        alert('Settings created successfully!');
+        showNotice('Settings created successfully!');
     };
 
     const resetDatabase = () => {
@@ -584,6 +585,16 @@ const Settings = () => {
                                 </div>
                             </div>
                         </div>
+                    ) : activeTab === 'transfer' ? (
+                        <DataTransferPanel
+                            db={db}
+                            agentId={mainAgencyAgent?.id || sessionAgentId}
+                            userEmail={userEmail}
+                            userRole={userRole}
+                            isAdmin={userRole === 'admin'}
+                            addRecord={addRecord}
+                            updateRecord={updateRecord}
+                        />
                     ) : activeTab === 'system' ? (
                         <div className="space-y-6">
                             <div>
@@ -620,6 +631,7 @@ const Settings = () => {
                     )}
                 </div>
 
+                {activeTab !== 'transfer' && (
                 <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3 shrink-0">
                     <button
                         onClick={handleCancel}
@@ -636,6 +648,7 @@ const Settings = () => {
                         Save Changes
                     </button>
                 </div>
+                )}
             </div>
         </div>
     );
